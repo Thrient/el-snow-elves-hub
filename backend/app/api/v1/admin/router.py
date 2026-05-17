@@ -116,13 +116,11 @@ async def list_users(db: AsyncSession = Depends(get_db)):
 
 @router.put("/users/{user_id}/role")
 async def update_user_role(user_id: int, body: UserRoleUpdate, db: AsyncSession = Depends(get_db)):
-    if body.role not in ("user", "admin"):
-        raise HTTPException(status_code=400, detail="无效的角色")
     result = await db.execute(select(User).where(User.id == user_id))
     user = result.scalar_one_or_none()
     if not user:
         raise HTTPException(status_code=404, detail="用户不存在")
-    user.role = body.role
+    user.role_id = body.role_id
     await db.commit()
     return {"ok": True}
 

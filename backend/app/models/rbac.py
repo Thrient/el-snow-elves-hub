@@ -13,6 +13,9 @@ PERMISSION_CODES = {
     "tasks.approve": "审核任务",
     "tasks.delete": "删除任务",
     "comments.delete": "删除评论",
+    "forum.view": "浏览论坛",
+    "forum.post": "发帖回帖",
+    "forum.manage": "管理论坛",
 }
 
 

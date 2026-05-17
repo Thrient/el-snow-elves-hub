@@ -1,4 +1,5 @@
 import axios from "axios";
+import { tryRefreshToken } from "../store/auth";
 
 const API = axios.create({ baseURL: "/api/v1" });
 
@@ -8,11 +9,25 @@ API.interceptors.request.use((config) => {
   return config;
 });
 
+let refreshPromise: Promise<string | null> | null = null;
+
 API.interceptors.response.use(
   (res) => res,
-  (err) => {
+  async (err) => {
     if (axios.isAxiosError(err) && err.response?.status === 401) {
+      // Try refresh once, dedupe concurrent 401s
+      if (!refreshPromise) {
+        refreshPromise = tryRefreshToken().finally(() => { refreshPromise = null; });
+      }
+      const newToken = await refreshPromise;
+      if (newToken) {
+        // Retry original request with new token
+        err.config!.headers.Authorization = `Bearer ${newToken}`;
+        return API(err.config!);
+      }
+      // Refresh failed — clear and redirect
       localStorage.removeItem("token");
+      localStorage.removeItem("refresh_token");
       localStorage.removeItem("user");
       window.location.href = "/login";
     }
@@ -93,6 +108,11 @@ export const adminApi = {
   listVersions: () => API.get<AdminVersion[]>("/admin/versions").then((r) => r.data),
   createVersion: (data: Omit<AdminVersion, "id" | "created_at">) =>
     API.post("/admin/versions", data).then((r) => r.data),
+  uploadVersionFile: (file: File) => {
+    const form = new FormData();
+    form.append("file", file);
+    return API.post("/files/upload", form).then((r) => r.data.data);
+  },
   deleteVersion: (id: number) => API.delete(`/admin/versions/${id}`),
 
   // Tasks

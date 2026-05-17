@@ -1,15 +1,20 @@
 import { useEffect, useState, type FC } from "react";
 import { Card, Typography, Button, Space, Tag } from "antd";
 import { DownloadOutlined } from "@ant-design/icons";
-import { adminApi, type AdminVersion } from "../api/admin";
+import axios from "axios";
 
 const { Title, Paragraph } = Typography;
 
+interface Version {
+  id: number; version: string; platform: string; changelog: string | null;
+  file_url: string; file_size: number | null; is_latest: boolean; created_at: string;
+}
+
 const DownloadPage: FC = () => {
-  const [versions, setVersions] = useState<AdminVersion[]>([]);
+  const [versions, setVersions] = useState<Version[]>([]);
 
   useEffect(() => {
-    adminApi.listVersions().then(setVersions);
+    axios.get("/api/v1/versions").then((r) => setVersions(r.data.data));
   }, []);
 
   const latest = versions.find((v) => v.is_latest);

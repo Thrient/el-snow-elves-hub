@@ -1,4 +1,4 @@
-import { useState, type FC } from "react";
+import { useEffect, useState, type FC } from "react";
 import { useNavigate } from "react-router-dom";
 import { Button, Input, message } from "antd";
 import { UserOutlined, MailOutlined, LockOutlined } from "@ant-design/icons";
@@ -9,9 +9,15 @@ type Mode = "login" | "register";
 
 const LoginPage: FC = () => {
   const navigate = useNavigate();
+  const token = useAuthStore((s) => s.token);
   const login = useAuthStore((s) => s.login);
   const register = useAuthStore((s) => s.register);
   const loading = useAuthStore((s) => s.loading);
+
+  // 已登录则跳回首页
+  useEffect(() => {
+    if (token) navigate("/", { replace: true });
+  }, [token, navigate]);
 
   const [mode, setMode] = useState<Mode>("login");
   const [form, setForm] = useState({ username: "", email: "", password: "" });

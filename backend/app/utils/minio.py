@@ -45,3 +45,16 @@ def download_file(key: str) -> tuple[bytes, str]:
     s3 = get_s3()
     resp = s3.get_object(Bucket=settings.minio_bucket, Key=key)
     return resp["Body"].read(), resp.get("ContentType", "application/octet-stream")
+
+
+def stream_file(key: str):
+    """流式读取 MinIO 文件，返回 (generator, content_type, content_length)"""
+    s3 = get_s3()
+    resp = s3.get_object(Bucket=settings.minio_bucket, Key=key)
+    body = resp["Body"]
+    ct = resp.get("ContentType", "application/octet-stream")
+    length = resp.get("ContentLength")
+    def generator():
+        for chunk in body.iter_chunks(chunk_size=1024 * 1024):
+            yield chunk
+    return generator(), ct, length

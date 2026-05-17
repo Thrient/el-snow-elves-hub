@@ -1,18 +1,19 @@
 """任务市场 API — 列表/详情/下载/点赞/评论/排行榜"""
 
 import math
-from datetime import datetime
-from fastapi import APIRouter, Depends, HTTPException, Query, UploadFile, Form
+from datetime import datetime, timedelta, timezone
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, UploadFile, Form
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
-from sqlalchemy import select, func, and_, desc
+from sqlalchemy import select, func, and_, or_, desc
 from sqlalchemy.ext.asyncio import AsyncSession
 import io
+from urllib.parse import quote
 
 from app.core.database import get_db
 from app.core.deps import get_current_user, get_optional_user
 from app.core.response import ok, fail
-from app.models.task import Comment as CommentModel, DownloadRecord, Task, TaskLike
+from app.models.task import Comment as CommentModel, DownloadRecord, Task, TaskLike, TaskView
 from app.models.user import User
 from app.models.file import File
 from app.utils.minio import download_file
@@ -35,6 +36,7 @@ class TaskOut(BaseModel):
     file_size: int | None
     cover_url: str | None
     status: str
+    view_count: int
     download_count: int
     like_count: int
     comment_count: int
@@ -69,7 +71,8 @@ async def _to_task(t: Task, current_user_id: int | None, db: AsyncSession) -> Ta
         author_id=t.author_id, author_name=author.username if author else "",
         category=t.category, tags=t.tags, version=t.version,
         file_size=t.file_size, cover_url=file_url_from_service(t.cover),
-        status=t.status, download_count=t.download_count,
+        status=t.status, view_count=t.view_count,
+        download_count=t.download_count,
         like_count=t.like_count, comment_count=t.comment_count,
         liked=liked, created_at=t.created_at,
     )
@@ -131,32 +134,75 @@ async def list_user_tasks(user_id: int, db: AsyncSession = Depends(get_db), user
     return ok(tasks)
 
 
+def _get_ip(request: Request) -> str:
+    return request.client.host if request.client else "unknown"
+
+
+def _has_recent(records, user_id: int | None, ip: str) -> bool:
+    cutoff = datetime.utcnow() - timedelta(hours=24)
+    for r in records:
+        ts = None
+        for attr in ("viewed_at", "downloaded_at", "created_at"):
+            ts = getattr(r, attr, None)
+            if ts: break
+        if ts and ts < cutoff:
+            continue
+        if user_id and r.user_id == user_id:
+            return True
+        if r.ip_address and ip and r.ip_address == ip:
+            return True
+    return False
+
+
 # ── Detail ──
 
 @router.get("/{task_id}")
-async def get_task(task_id: int, db: AsyncSession = Depends(get_db), user: User | None = Depends(get_optional_user)):
+async def get_task(task_id: int, db: AsyncSession = Depends(get_db), user: User | None = Depends(get_optional_user), request: Request = None):
     t = (await db.execute(select(Task).where(Task.id == task_id))).scalar_one_or_none()
     if not t:
         raise HTTPException(404, "任务不存在")
-    return ok(await _to_task(t, user.id if user else None, db))
+    # View counting with 24h dedup
+    ip = _get_ip(request) if request else ""
+    uid = user.id if user else None
+    recent_views = (await db.execute(
+        select(TaskView).where(
+            and_(TaskView.task_id == task_id, TaskView.viewed_at >= datetime.utcnow() - timedelta(hours=24))
+        )
+    )).scalars().all()
+    if not _has_recent(recent_views, uid, ip):
+        t.view_count += 1
+        db.add(TaskView(task_id=task_id, user_id=uid, ip_address=ip))
+        await db.commit()
+        await db.refresh(t)
+    return ok(await _to_task(t, uid, db))
 
 
 # ── Download ──
 
 @router.get("/{task_id}/download")
-async def download_task(task_id: int, db: AsyncSession = Depends(get_db), user: User | None = Depends(get_optional_user)):
+async def download_task(task_id: int, db: AsyncSession = Depends(get_db), user: User | None = Depends(get_optional_user), request: Request = None):
     t = (await db.execute(select(Task).where(Task.id == task_id))).scalar_one_or_none()
     if not t:
         raise HTTPException(404, "任务不存在")
-    t.download_count += 1
-    db.add(DownloadRecord(task_id=t.id, user_id=user.id if user else None))
-    await db.commit()
+
+    ip = _get_ip(request) if request else ""
+    uid = user.id if user else None
+    recent = (await db.execute(
+        select(DownloadRecord).where(
+            and_(DownloadRecord.task_id == task_id, DownloadRecord.downloaded_at >= datetime.utcnow() - timedelta(hours=24))
+        )
+    )).scalars().all()
+    if not _has_recent(recent, uid, ip):
+        t.download_count += 1
+        db.add(DownloadRecord(task_id=t.id, user_id=uid, ip_address=ip))
+        await db.commit()
 
     if not t.file:
         raise HTTPException(404, "任务文件不存在")
     data, ct = download_file(t.file.key)
+    encoded = quote(t.file.original_name)
     return StreamingResponse(io.BytesIO(data), media_type=ct,
-        headers={"Content-Disposition": f'attachment; filename="{t.title}.zip"'})
+        headers={"Content-Disposition": f"attachment; filename*=UTF-8''{encoded}"})
 
 
 # ── Like ──

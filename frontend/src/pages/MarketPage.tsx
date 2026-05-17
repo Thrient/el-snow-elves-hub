@@ -6,7 +6,7 @@ import { taskApi, type TaskItem, type PageResult } from "../api/tasks";
 import { useAuthStore } from "../store/auth";
 
 const { Title } = Typography;
-const CATEGORIES = ["全部", "采集", "日常", "帮会", "活动", "综合"];
+const CATEGORIES = ["全部", "综合"];
 
 const animKeyframes = `
 @keyframes card-in {

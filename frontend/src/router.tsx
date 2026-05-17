@@ -1,10 +1,15 @@
 import { type FC } from "react";
 import { Navigate } from "react-router-dom";
 import type { RouteObject } from "react-router-dom";
-import { HomeOutlined, DownloadOutlined, AppstoreOutlined, SettingOutlined, DashboardOutlined, UserOutlined, CloudDownloadOutlined } from "@ant-design/icons";
+import { HomeOutlined, DownloadOutlined, AppstoreOutlined, MessageOutlined, SettingOutlined, DashboardOutlined, UserOutlined, CloudDownloadOutlined } from "@ant-design/icons";
 
 import HomePage from "./pages/HomePage";
 import DownloadPage from "./pages/DownloadPage";
+import ForumPage from "./pages/ForumPage";
+import ForumBoardPage from "./pages/ForumBoardPage";
+import ForumThreadPage from "./pages/ForumThreadPage";
+import ForumCreatePage from "./pages/ForumCreatePage";
+import ForumSearchPage from "./pages/ForumSearchPage";
 import MarketPage from "./pages/MarketPage";
 import TaskDetailPage from "./pages/TaskDetailPage";
 import RankingPage from "./pages/RankingPage";
@@ -12,6 +17,7 @@ import AuthorPage from "./pages/AuthorPage";
 import UploadPage from "./pages/UploadPage";
 import ProfilePage from "./pages/ProfilePage";
 import LoginPage from "./pages/LoginPage";
+import NotificationsPage from "./pages/NotificationsPage";
 import AdminLayout from "./pages/admin/AdminLayout";
 import DashboardPage from "./pages/admin/DashboardPage";
 import UsersPage from "./pages/admin/UsersPage";
@@ -34,6 +40,7 @@ export const navItems: NavItem[] = [
   { path: "/", title: "首页", icon: HomeOutlined },
   { path: "/download", title: "下载", icon: DownloadOutlined },
   { path: "/market", title: "任务市场", icon: AppstoreOutlined },
+  { path: "/forum", title: "论坛", icon: MessageOutlined },
   {
     path: "/admin",
     title: "管理",
@@ -56,6 +63,12 @@ export function buildRoutes(hasPerm: (code: string) => boolean): RouteObject[] {
   return [
     { path: "/", element: <HomePage /> },
     { path: "/download", element: <DownloadPage /> },
+    { path: "/forum", element: <ForumPage /> },
+    { path: "/forum/create", element: <ForumCreatePage /> },
+    { path: "/forum/search", element: <ForumSearchPage /> },
+    { path: "/forum/:boardId", element: <ForumBoardPage /> },
+    { path: "/forum/post/:threadId", element: <ForumThreadPage /> },
+  { path: "/notifications", element: <NotificationsPage /> },
     { path: "/market", element: <MarketPage /> },
     { path: "/market/:id", element: <TaskDetailPage /> },
     { path: "/ranking", element: <RankingPage /> },

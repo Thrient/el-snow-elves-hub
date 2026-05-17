@@ -1,8 +1,7 @@
 services:
   backend:
     build: ./backend
-    ports:
-      - "8000:8000"
+    container_name: el-snow-hub-backend
     env_file:
       - ./backend/.env.prod
     networks:
@@ -11,6 +10,7 @@ services:
 
   nginx:
     image: nginx:alpine
+    container_name: el-snow-hub-nginx
     ports:
       - "5173:80"
     volumes:

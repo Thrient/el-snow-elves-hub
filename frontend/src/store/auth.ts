@@ -21,7 +21,24 @@ interface AuthState {
   register: (username: string, email: string, password: string) => Promise<void>;
   logout: () => void;
   loadFromStorage: () => void;
+  refreshToken: () => Promise<boolean>;
   hasPerm: (code: string) => boolean;
+}
+
+/** Call this when API returns 401 — tries to refresh, returns true if succeeded */
+export async function tryRefreshToken(): Promise<string | null> {
+  const refresh = localStorage.getItem("refresh_token");
+  if (!refresh) return null;
+  try {
+    const { data } = await axios.post("/api/v1/auth/refresh", { refresh_token: refresh });
+    localStorage.setItem("token", data.access_token);
+    localStorage.setItem("refresh_token", data.refresh_token);
+    localStorage.setItem("user", JSON.stringify(data.user));
+    useAuthStore.setState({ user: data.user, token: data.access_token });
+    return data.access_token;
+  } catch {
+    return null;
+  }
 }
 
 export const useAuthStore = create<AuthState>((set, get) => ({
@@ -34,6 +51,7 @@ export const useAuthStore = create<AuthState>((set, get) => ({
     try {
       const { data } = await API.post("/auth/login", { email, password });
       localStorage.setItem("token", data.access_token);
+      localStorage.setItem("refresh_token", data.refresh_token);
       localStorage.setItem("user", JSON.stringify(data.user));
       set({ user: data.user, token: data.access_token, loading: false });
     } catch {
@@ -47,6 +65,7 @@ export const useAuthStore = create<AuthState>((set, get) => ({
     try {
       const { data } = await API.post("/auth/register", { username, email, password });
       localStorage.setItem("token", data.access_token);
+      localStorage.setItem("refresh_token", data.refresh_token);
       localStorage.setItem("user", JSON.stringify(data.user));
       set({ user: data.user, token: data.access_token, loading: false });
     } catch {
@@ -57,6 +76,7 @@ export const useAuthStore = create<AuthState>((set, get) => ({
 
   logout: () => {
     localStorage.removeItem("token");
+    localStorage.removeItem("refresh_token");
     localStorage.removeItem("user");
     set({ user: null, token: null });
   },
@@ -71,6 +91,11 @@ export const useAuthStore = create<AuthState>((set, get) => ({
         localStorage.removeItem("user");
       }
     }
+  },
+
+  refreshToken: async () => {
+    const newToken = await tryRefreshToken();
+    return !!newToken;
   },
 
   hasPerm: (code: string) => {
