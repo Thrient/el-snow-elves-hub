@@ -16,6 +16,7 @@ PERMISSION_CODES = {
     "forum.view": "浏览论坛",
     "forum.post": "发帖回帖",
     "forum.manage": "管理论坛",
+    "routes.manage": "管理路由",
 }
 
 

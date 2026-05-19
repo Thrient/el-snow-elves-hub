@@ -224,3 +224,78 @@ async def delete_task(task_id: int, db: AsyncSession = Depends(get_db)):
     await db.delete(t)
     await db.commit()
     return {"ok": True}
+
+
+# ── Route Management ──
+
+from app.models.route import Route as RouteModel
+from app.schemas.route import RouteAdmin, RouteCreate, RouteUpdate, RouteToggle
+
+
+@router.get("/routes", response_model=list[RouteAdmin])
+async def list_routes(db: AsyncSession = Depends(get_db)):
+    result = await db.execute(
+        select(RouteModel).order_by(RouteModel.sort_order)
+    )
+    return [RouteAdmin.model_validate(r) for r in result.scalars().all()]
+
+
+@router.post("/routes", status_code=status.HTTP_201_CREATED, response_model=RouteAdmin)
+async def create_route(body: RouteCreate, db: AsyncSession = Depends(get_db)):
+    existing = (await db.execute(
+        select(RouteModel).where(RouteModel.path == body.path)
+    )).scalar_one_or_none()
+    if existing:
+        raise HTTPException(status_code=400, detail="路由路径已存在")
+    if body.parent_id is not None:
+        parent = (await db.execute(
+            select(RouteModel).where(RouteModel.id == body.parent_id)
+        )).scalar_one_or_none()
+        if not parent:
+            raise HTTPException(status_code=400, detail="父级路由不存在")
+    route = RouteModel(**body.model_dump())
+    db.add(route)
+    await db.commit()
+    await db.refresh(route)
+    return RouteAdmin.model_validate(route)
+
+
+@router.put("/routes/{route_id}", response_model=RouteAdmin)
+async def update_route(route_id: int, body: RouteUpdate, db: AsyncSession = Depends(get_db)):
+    result = await db.execute(
+        select(RouteModel).where(RouteModel.id == route_id)
+    )
+    route = result.scalar_one_or_none()
+    if not route:
+        raise HTTPException(status_code=404, detail="路由不存在")
+    for field, value in body.model_dump(exclude_unset=True).items():
+        setattr(route, field, value)
+    await db.commit()
+    await db.refresh(route)
+    return RouteAdmin.model_validate(route)
+
+
+@router.delete("/routes/{route_id}")
+async def delete_route(route_id: int, db: AsyncSession = Depends(get_db)):
+    result = await db.execute(
+        select(RouteModel).where(RouteModel.id == route_id)
+    )
+    route = result.scalar_one_or_none()
+    if not route:
+        raise HTTPException(status_code=404, detail="路由不存在")
+    await db.delete(route)
+    await db.commit()
+    return {"ok": True}
+
+
+@router.put("/routes/{route_id}/toggle")
+async def toggle_route(route_id: int, body: RouteToggle, db: AsyncSession = Depends(get_db)):
+    result = await db.execute(
+        select(RouteModel).where(RouteModel.id == route_id)
+    )
+    route = result.scalar_one_or_none()
+    if not route:
+        raise HTTPException(status_code=404, detail="路由不存在")
+    route.enabled = body.enabled
+    await db.commit()
+    return {"ok": True, "enabled": route.enabled}

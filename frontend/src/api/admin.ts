@@ -87,6 +87,20 @@ export interface AdminTask {
   created_at: string;
 }
 
+export interface RouteAdmin {
+  id: number;
+  path: string;
+  title: string;
+  icon: string | null;
+  parent_id: number | null;
+  perm: string | null;
+  enabled: boolean;
+  sort_order: number;
+  component: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
 export const adminApi = {
   // Dashboard
   getStats: () => API.get<AdminStats>("/admin/stats").then((r) => r.data),
@@ -120,4 +134,14 @@ export const adminApi = {
   approveTask: (id: number) => API.post(`/admin/tasks/${id}/approve`),
   rejectTask: (id: number) => API.post(`/admin/tasks/${id}/reject`),
   deleteTask: (id: number) => API.delete(`/admin/tasks/${id}`),
+
+  // Routes
+  listRoutes: () => API.get<RouteAdmin[]>("/admin/routes").then((r) => r.data),
+  createRoute: (data: Omit<RouteAdmin, "id" | "created_at" | "updated_at">) =>
+    API.post("/admin/routes", data).then((r) => r.data),
+  updateRoute: (id: number, data: Partial<RouteAdmin>) =>
+    API.put(`/admin/routes/${id}`, data).then((r) => r.data),
+  deleteRoute: (id: number) => API.delete(`/admin/routes/${id}`),
+  toggleRoute: (id: number, enabled: boolean) =>
+    API.put(`/admin/routes/${id}/toggle`, { enabled }),
 };

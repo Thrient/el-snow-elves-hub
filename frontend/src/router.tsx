@@ -1,32 +1,12 @@
-import { type FC } from "react";
-import { Navigate } from "react-router-dom";
-import type { RouteObject } from "react-router-dom";
-import { HomeOutlined, DownloadOutlined, AppstoreOutlined, MessageOutlined, SettingOutlined, DashboardOutlined, UserOutlined, CloudDownloadOutlined } from "@ant-design/icons";
+import { type FC, type ReactNode } from "react";
+import { Navigate, type RouteObject } from "react-router-dom";
+import { useRoutesStore } from "./store/routes";
+import { getComponent } from "./registry";
+import { resolveIcon } from "./components/IconResolver";
+import RouteGuard from "./components/RouteGuard";
+import type { RoutePublic } from "./api/routes";
 
-import HomePage from "./pages/HomePage";
-import DownloadPage from "./pages/DownloadPage";
-import ForumPage from "./pages/ForumPage";
-import ForumBoardPage from "./pages/ForumBoardPage";
-import ForumThreadPage from "./pages/ForumThreadPage";
-import ForumCreatePage from "./pages/ForumCreatePage";
-import ForumSearchPage from "./pages/ForumSearchPage";
-import MarketPage from "./pages/MarketPage";
-import TaskDetailPage from "./pages/TaskDetailPage";
-import RankingPage from "./pages/RankingPage";
-import AuthorPage from "./pages/AuthorPage";
-import UploadPage from "./pages/UploadPage";
-import ProfilePage from "./pages/ProfilePage";
-import LoginPage from "./pages/LoginPage";
-import NotificationsPage from "./pages/NotificationsPage";
-import AdminLayout from "./pages/admin/AdminLayout";
-import DashboardPage from "./pages/admin/DashboardPage";
-import UsersPage from "./pages/admin/UsersPage";
-import RolesPage from "./pages/admin/RolesPage";
-import PermissionsPage from "./pages/admin/PermissionsPage";
-import VersionsPage from "./pages/admin/VersionsPage";
-import TasksPage from "./pages/admin/TasksPage";
-
-// ── Route meta（用于导航菜单）──
+// ── NavItem (kept for external reference) ──
 
 export interface NavItem {
   path: string;
@@ -36,79 +16,100 @@ export interface NavItem {
   children?: NavItem[];
 }
 
-export const navItems: NavItem[] = [
-  { path: "/", title: "首页", icon: HomeOutlined },
-  { path: "/download", title: "下载", icon: DownloadOutlined },
-  { path: "/market", title: "任务市场", icon: AppstoreOutlined },
-  { path: "/forum", title: "论坛", icon: MessageOutlined },
-  {
-    path: "/admin",
-    title: "管理",
-    icon: SettingOutlined,
-    perm: "admin.access",
-    children: [
-      { path: "/admin/dashboard", title: "仪表盘", perm: "dashboard.view", icon: DashboardOutlined },
-      { path: "/admin/users", title: "用户管理", perm: "users.manage", icon: UserOutlined },
-      { path: "/admin/roles", title: "角色管理", perm: "users.manage", icon: UserOutlined },
-      { path: "/admin/permissions", title: "权限列表", perm: "users.manage", icon: UserOutlined },
-      { path: "/admin/versions", title: "下载版本", perm: "versions.manage", icon: CloudDownloadOutlined },
-      { path: "/admin/tasks", title: "任务管理", perm: "tasks.approve", icon: AppstoreOutlined },
-    ],
-  },
-];
+// ── Helpers ──
 
-// ── React Router 路由对象 ──
-
-export function buildRoutes(hasPerm: (code: string) => boolean): RouteObject[] {
-  return [
-    { path: "/", element: <HomePage /> },
-    { path: "/download", element: <DownloadPage /> },
-    { path: "/forum", element: <ForumPage /> },
-    { path: "/forum/create", element: <ForumCreatePage /> },
-    { path: "/forum/search", element: <ForumSearchPage /> },
-    { path: "/forum/:boardId", element: <ForumBoardPage /> },
-    { path: "/forum/post/:threadId", element: <ForumThreadPage /> },
-  { path: "/notifications", element: <NotificationsPage /> },
-    { path: "/market", element: <MarketPage /> },
-    { path: "/market/:id", element: <TaskDetailPage /> },
-    { path: "/ranking", element: <RankingPage /> },
-    { path: "/user/:id", element: <AuthorPage /> },
-    { path: "/upload", element: <UploadPage /> },
-    { path: "/profile", element: <ProfilePage /> },
-    { path: "/login", element: <LoginPage /> },
-    ...(hasPerm("admin.access")
-      ? [{
-          path: "/admin",
-          element: <AdminLayout />,
-          children: [
-            { index: true, element: <Navigate to="/admin/dashboard" replace /> },
-            ...(hasPerm("dashboard.view") ? [{ path: "dashboard", element: <DashboardPage /> }] : []),
-            ...(hasPerm("users.manage") ? [{ path: "users", element: <UsersPage /> }] : []),
-            ...(hasPerm("users.manage") ? [{ path: "roles", element: <RolesPage /> }] : []),
-            ...(hasPerm("users.manage") ? [{ path: "permissions", element: <PermissionsPage /> }] : []),
-            ...(hasPerm("versions.manage") ? [{ path: "versions", element: <VersionsPage /> }] : []),
-            ...(hasPerm("tasks.approve") ? [{ path: "tasks", element: <TasksPage /> }] : []),
-          ],
-        } as RouteObject]
-      : []),
-    { path: "*", element: <div style={{ textAlign: "center", padding: 80, color: "#b8afa6" }}>404 · 页面不存在</div> },
-  ];
+function relativePath(childPath: string, parentPath: string): string {
+  const base = parentPath.endsWith("/") ? parentPath.slice(0, -1) : parentPath;
+  if (childPath.startsWith(base + "/")) return childPath.slice(base.length + 1);
+  if (childPath === base) return "";
+  return childPath;
 }
 
-// ── 导航菜单生成 ──
+function wrapElement(component: ReactNode, perm: string | null, _isLayout: boolean): ReactNode {
+  if (perm) {
+    return <RouteGuard perm={perm}>{component}</RouteGuard>;
+  }
+  return component;
+}
 
-type MenuItem = { key: string; icon?: React.ReactNode; label: string; children?: MenuItem[] };
+// ── Dynamic route builder ──
 
-export function buildMenuItems(hasPerm: (code: string) => boolean): MenuItem[] {
-  const walk = (items: NavItem[]): MenuItem[] =>
-    items
-      .filter((i) => !i.perm || hasPerm(i.perm))
-      .map((i) => ({
-        key: i.path,
-        icon: i.icon ? <i.icon /> : undefined,
-        label: i.title,
-        children: i.children ? walk(i.children) : undefined,
-      }));
+export function useDynamicRoutes(): RouteObject[] {
+  const routes = useRoutesStore((s) => s.routes);
 
-  return walk(navItems);
+  function buildRouteObjects(
+    items: RoutePublic[],
+    parentPath: string = ""
+  ): RouteObject[] {
+    return items.map((route) => {
+      const Component = getComponent(route.component);
+      const isLayout = route.component === "AdminLayout";
+      const elem = <Component title={route.title} />;
+      const guarded = wrapElement(elem, route.perm, isLayout);
+
+      const routeObj: RouteObject = {
+        path: parentPath
+          ? relativePath(route.path, parentPath)
+          : route.path,
+        element: guarded as ReactNode,
+      };
+
+      if (route.children && route.children.length > 0) {
+        routeObj.children = buildRouteObjects(route.children, route.path);
+        // Add index redirect for layout routes
+        if (isLayout && route.children.length > 0) {
+          routeObj.children.unshift({
+            index: true,
+            element: <Navigate to={route.children[0].path} replace />,
+          });
+        }
+      }
+
+      return routeObj;
+    });
+  }
+
+  const dynamicRoutes = buildRouteObjects(routes);
+
+  // Catch-all 404
+  dynamicRoutes.push({
+    path: "*",
+    element: (
+      <div style={{ textAlign: "center", padding: 80, color: "#b8afa6" }}>
+        404 · 页面不存在
+      </div>
+    ),
+  });
+
+  return dynamicRoutes;
+}
+
+// ── Dynamic menu builder ──
+
+type MenuItem = {
+  key: string;
+  icon?: ReactNode;
+  label: string;
+  children?: MenuItem[];
+};
+
+export function useDynamicMenuItems(): MenuItem[] {
+  const routes = useRoutesStore((s) => s.routes);
+
+  function buildMenu(items: RoutePublic[]): MenuItem[] {
+    return items.map((route) => {
+      const IconComp = resolveIcon(route.icon);
+      const item: MenuItem = {
+        key: route.path,
+        icon: IconComp ? <IconComp /> : undefined,
+        label: route.title,
+      };
+      if (route.children && route.children.length > 0) {
+        item.children = buildMenu(route.children);
+      }
+      return item;
+    });
+  }
+
+  return buildMenu(routes);
 }

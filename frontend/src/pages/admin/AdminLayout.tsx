@@ -1,8 +1,10 @@
 import { type FC } from "react";
 import { Outlet, useNavigate, useLocation } from "react-router-dom";
 import { Layout, Menu, Button, Result } from "antd";
-import { DashboardOutlined, UserOutlined, TeamOutlined, SafetyCertificateOutlined, DownloadOutlined, AppstoreOutlined, ArrowLeftOutlined } from "@ant-design/icons";
+import { ArrowLeftOutlined } from "@ant-design/icons";
 import { useAuthStore } from "../../store/auth";
+import { useRoutesStore } from "../../store/routes";
+import { resolveIcon } from "../../components/IconResolver";
 import type { MenuProps } from "antd";
 
 const { Sider, Content } = Layout;
@@ -12,6 +14,9 @@ const AdminLayout: FC = () => {
   const location = useLocation();
   const user = useAuthStore((s) => s.user);
   const hasPerm = useAuthStore((s) => s.hasPerm);
+  const routes = useRoutesStore((s) => s.routes);
+  const adminRoute = routes.find((r) => r.path === "/admin");
+  const adminChildren = adminRoute?.children || [];
 
   if (!user) {
     return <Result status="403" title="请先登录" extra={<Button type="primary" onClick={() => navigate("/login")}>去登录</Button>} />;
@@ -20,14 +25,14 @@ const AdminLayout: FC = () => {
     return <Result status="403" title="无权限" subTitle="需要管理员权限" extra={<Button onClick={() => navigate("/")}>返回首页</Button>} />;
   }
 
-  const menuItems: MenuProps["items"] = [
-    ...(hasPerm("dashboard.view") ? [{ key: "/admin/dashboard", icon: <DashboardOutlined />, label: "仪表盘" }] : []),
-    ...(hasPerm("users.manage") ? [{ key: "/admin/users", icon: <UserOutlined />, label: "用户管理" }] : []),
-    ...(hasPerm("users.manage") ? [{ key: "/admin/roles", icon: <TeamOutlined />, label: "角色管理" }] : []),
-    ...(hasPerm("users.manage") ? [{ key: "/admin/permissions", icon: <SafetyCertificateOutlined />, label: "权限列表" }] : []),
-    ...(hasPerm("versions.manage") ? [{ key: "/admin/versions", icon: <DownloadOutlined />, label: "下载版本" }] : []),
-    ...(hasPerm("tasks.approve") ? [{ key: "/admin/tasks", icon: <AppstoreOutlined />, label: "任务管理" }] : []),
-  ];
+  const menuItems: MenuProps["items"] = adminChildren.map((child) => {
+    const IconComp = resolveIcon(child.icon);
+    return {
+      key: child.path,
+      icon: IconComp ? <IconComp /> : undefined,
+      label: child.title,
+    };
+  });
 
   return (
     <Layout style={{ minHeight: "calc(100vh - 52px - 70px)", background: "#faf8f5" }}>

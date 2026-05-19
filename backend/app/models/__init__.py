@@ -6,3 +6,4 @@ from app.models.task import Task, Comment, TaskLike, DownloadRecord  # noqa: F40
 from app.models.forum import ForumBoard, ForumPost  # noqa: F401
 from app.models.upload import Upload  # noqa: F401
 from app.models.notification import Notification  # noqa: F401
+from app.models.route import Route  # noqa: F401

@@ -1,9 +1,10 @@
 import { useEffect, useState, type FC } from "react";
 import { useNavigate, useLocation, useRoutes } from "react-router-dom";
-import { ConfigProvider, Layout, Menu, Button, Badge, Popover, List } from "antd";
+import { ConfigProvider, Layout, Menu, Button, Badge, Popover, List, Spin } from "antd";
 import { UserOutlined, BellOutlined } from "@ant-design/icons";
 import { useAuthStore } from "./store/auth";
-import { buildRoutes, buildMenuItems } from "./router";
+import { useRoutesStore } from "./store/routes";
+import { useDynamicRoutes, useDynamicMenuItems } from "./router";
 import { notificationApi, type NotificationItem } from "./api/notifications";
 
 const { Header, Content, Footer } = Layout;
@@ -14,11 +15,17 @@ const AppShell: FC = () => {
   const user = useAuthStore((s) => s.user);
   const logout = useAuthStore((s) => s.logout);
   const loadFromStorage = useAuthStore((s) => s.loadFromStorage);
-  const hasPerm = useAuthStore((s) => s.hasPerm);
+  const fetchRoutes = useRoutesStore((s) => s.fetchRoutes);
+  const routesLoading = useRoutesStore((s) => s.loading);
 
   useEffect(() => {
     loadFromStorage();
   }, [loadFromStorage]);
+
+  // 用户变化时重新拉取路由
+  useEffect(() => {
+    fetchRoutes();
+  }, [user, fetchRoutes]);
 
   const [unreadCount, setUnreadCount] = useState(0);
   const [notifPopover, setNotifPopover] = useState(false);
@@ -50,8 +57,8 @@ const AppShell: FC = () => {
     notificationApi.list(1).then((d) => setRecentNotifs(d.items.slice(0, 5)));
   };
 
-  const routes = buildRoutes(hasPerm);
-  const menuItems = buildMenuItems(hasPerm);
+  const routes = useDynamicRoutes();
+  const menuItems = useDynamicMenuItems();
 
   return (
     <Layout style={{ minHeight: "100vh", background: "#faf8f5", overflow: "hidden" }}>
@@ -172,7 +179,11 @@ const AppShell: FC = () => {
       </Header>
 
       <Content style={{ padding: "24px", maxWidth: 1200, margin: "0 auto", width: "100%" }}>
-        {useRoutes(routes)}
+        {routesLoading ? (
+          <Spin size="large" style={{ display: "block", marginTop: "20vh" }} />
+        ) : (
+          useRoutes(routes)
+        )}
       </Content>
 
       <Footer style={{ textAlign: "center", color: "#b8afa6", fontSize: 12, background: "transparent" }}>

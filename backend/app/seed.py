@@ -104,6 +104,49 @@ async def seed():
             db.add_all(boards)
             print("已创建默认论坛板块")
 
+        # ── Routes ──
+        from app.models.route import Route as RouteModel
+        route_count = (await db.execute(select(func.count(RouteModel.id)))).scalar() or 0
+        if route_count == 0:
+            top_routes = [
+                RouteModel(path="/", title="首页", icon="HomeOutlined", sort_order=10, component="HomePage"),
+                RouteModel(path="/download", title="下载", icon="DownloadOutlined", sort_order=20, component="DownloadPage"),
+                RouteModel(path="/market", title="任务市场", icon="AppstoreOutlined", sort_order=30, component="MarketPage"),
+                RouteModel(path="/market/:id", title="任务详情", sort_order=31, component="TaskDetailPage"),
+                RouteModel(path="/forum", title="论坛", icon="MessageOutlined", sort_order=40, component="ForumPage"),
+                RouteModel(path="/forum/create", title="发帖", sort_order=41, component="ForumCreatePage"),
+                RouteModel(path="/forum/search", title="搜索", sort_order=42, component="ForumSearchPage"),
+                RouteModel(path="/forum/:boardId", title="板块", sort_order=43, component="ForumBoardPage"),
+                RouteModel(path="/forum/post/:threadId", title="帖子", sort_order=44, component="ForumThreadPage"),
+                RouteModel(path="/ranking", title="排行榜", sort_order=50, component="RankingPage"),
+                RouteModel(path="/user/:id", title="用户主页", sort_order=60, component="AuthorPage"),
+                RouteModel(path="/upload", title="上传", sort_order=70, component="UploadPage"),
+                RouteModel(path="/profile", title="个人中心", sort_order=80, component="ProfilePage"),
+                RouteModel(path="/login", title="登录", sort_order=90, component="LoginPage"),
+                RouteModel(path="/notifications", title="通知", sort_order=100, component="NotificationsPage"),
+                RouteModel(path="/admin", title="管理", icon="SettingOutlined", perm="admin.access", sort_order=110, component="AdminLayout"),
+            ]
+            db.add_all(top_routes)
+            await db.flush()
+
+            # 查找 admin 父路由 ID
+            admin_route = (await db.execute(
+                select(RouteModel).where(RouteModel.path == "/admin")
+            )).scalar_one()
+
+            admin_children = [
+                RouteModel(path="/admin/dashboard", title="仪表盘", icon="DashboardOutlined", parent_id=admin_route.id, perm="dashboard.view", sort_order=10, component="DashboardPage"),
+                RouteModel(path="/admin/users", title="用户管理", icon="UserOutlined", parent_id=admin_route.id, perm="users.manage", sort_order=20, component="UsersPage"),
+                RouteModel(path="/admin/roles", title="角色管理", icon="TeamOutlined", parent_id=admin_route.id, perm="users.manage", sort_order=30, component="RolesPage"),
+                RouteModel(path="/admin/permissions", title="权限列表", icon="SafetyCertificateOutlined", parent_id=admin_route.id, perm="users.manage", sort_order=40, component="PermissionsPage"),
+                RouteModel(path="/admin/versions", title="下载版本", icon="CloudDownloadOutlined", parent_id=admin_route.id, perm="versions.manage", sort_order=50, component="VersionsPage"),
+                RouteModel(path="/admin/tasks", title="任务管理", icon="AppstoreOutlined", parent_id=admin_route.id, perm="tasks.approve", sort_order=60, component="TasksPage"),
+                RouteModel(path="/admin/routes", title="路由管理", icon="NodeIndexOutlined", parent_id=admin_route.id, perm="routes.manage", sort_order=70, component="RoutesPage"),
+            ]
+            db.add_all(admin_children)
+            await db.flush()
+            print("已创建默认路由配置")
+
         await db.commit()
         print("Seed 完成")
 
