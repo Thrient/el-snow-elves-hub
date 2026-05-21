@@ -1,11 +1,14 @@
 import { useEffect, useState, type FC } from "react";
 import { Table, Select, message, Tag, Space } from "antd";
+import { useAuthStore } from "../../store/auth";
 import { adminApi, type AdminUser, type RoleItem } from "../../api/admin";
 
 const UsersPage: FC = () => {
   const [users, setUsers] = useState<AdminUser[]>([]);
   const [roles, setRoles] = useState<RoleItem[]>([]);
   const [loading, setLoading] = useState(false);
+  const hasPerm = useAuthStore((s) => s.hasPerm);
+  const canManage = hasPerm("user:assign");
 
   const load = async () => {
     setLoading(true);
@@ -19,11 +22,18 @@ const UsersPage: FC = () => {
 
   useEffect(() => { load(); }, []);
 
-  const changeRole = async (userId: number, roleId: number) => {
+  const changeRoles = async (userId: number, roleIds: number[]) => {
     try {
-      await adminApi.updateUserRole(userId, roleId);
+      await adminApi.updateUserRoles(userId, roleIds);
       message.success("角色已更新");
-      setUsers((prev) => prev.map((u) => u.id === userId ? { ...u, role_id: roleId, role_name: roles.find((r) => r.id === roleId)?.name || null, permissions: roles.find((r) => r.id === roleId)?.permissions.map((p) => p.code) || null } : u));
+      setUsers((prev) => prev.map((u) => u.id === userId ? {
+        ...u,
+        role_ids: roleIds,
+        role_names: roleIds.map((rid) => roles.find((r) => r.id === rid)?.name || "").filter(Boolean),
+        permissions: roleIds.flatMap((rid) =>
+          roles.find((r) => r.id === rid)?.permissions.map((p) => p.code) || []
+        ),
+      } : u));
     } catch { message.error("更新失败"); }
   };
 
@@ -31,31 +41,40 @@ const UsersPage: FC = () => {
 
   return (
     <div>
-      <h2 style={{ fontSize: 18, fontWeight: 600, color: "#3d3630", marginBottom: 24 }}>用户管理</h2>
+      <h2 style={{ fontSize: 18, fontWeight: 600, color: "#3d3630", margin: "0 0 24px" }}>用户管理</h2>
       <Table
         dataSource={users}
         rowKey="id"
         loading={loading}
-        pagination={false}
+        pagination={{ pageSize: 20, showTotal: (t: number) => `共 ${t} 条` }}
+        scroll={{ y: "calc(100vh - 330px)" }}
         style={{ background: "#fff", borderRadius: 12 }}
         columns={[
           { title: "ID", dataIndex: "id", width: 50 },
           { title: "用户名", dataIndex: "username" },
           { title: "邮箱", dataIndex: "email" },
-          {
-            title: "角色", width: 140,
+          ...(canManage ? [{
+            title: "角色", width: 180,
             render: (_: unknown, record: AdminUser) => (
               <Select
-                value={record.role_id}
+                mode="multiple"
+                value={record.role_ids}
                 size="small"
-                style={{ width: 120 }}
+                style={{ width: 160 }}
                 placeholder="未分配"
                 allowClear
-                onChange={(v) => changeRole(record.id, v)}
+                onChange={(v) => changeRoles(record.id, v)}
                 options={roles.map((r) => ({ value: r.id, label: r.name }))}
               />
             ),
-          },
+          }] : [{
+            title: "角色", width: 140,
+            render: (_: unknown, record: AdminUser) => (
+              record.role_names?.length
+                ? record.role_names.map((n) => <Tag key={n}>{n}</Tag>)
+                : <span style={{ color: "#b8afa6", fontSize: 11 }}>未分配</span>
+            ),
+          }]),
           {
             title: "权限", width: 220,
             render: (_: unknown, record: AdminUser) => (

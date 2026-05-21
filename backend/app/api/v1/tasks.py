@@ -261,6 +261,27 @@ async def create_comment(task_id: int, body: CommentCreate, user: User = Depends
     return ok({"id": c.id})
 
 
+@router.delete("/{task_id}/comments/{comment_id}")
+async def delete_comment(
+    task_id: int,
+    comment_id: int,
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    c = (await db.execute(select(CommentModel).where(
+        CommentModel.id == comment_id, CommentModel.task_id == task_id
+    ))).scalar_one_or_none()
+    if not c:
+        raise HTTPException(404, "评论不存在")
+    if c.user_id != user.id and not user.has_permission("comment:delete"):
+        raise HTTPException(403, "无权删除")
+    t = (await db.execute(select(Task).where(Task.id == task_id))).scalar_one()
+    await db.delete(c)
+    t.comment_count = max(0, t.comment_count - 1)
+    await db.commit()
+    return ok({})
+
+
 # ── Upload ──
 
 @router.post("", status_code=201)

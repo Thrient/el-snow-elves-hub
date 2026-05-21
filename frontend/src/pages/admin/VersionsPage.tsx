@@ -1,6 +1,7 @@
 import { useEffect, useState, type FC } from "react";
 import { Table, Button, Modal, Input, message, Switch, Upload } from "antd";
 import { PlusOutlined, DeleteOutlined, InboxOutlined } from "@ant-design/icons";
+import { useAuthStore } from "../../store/auth";
 import { adminApi, type AdminVersion } from "../../api/admin";
 
 const { Dragger } = Upload;
@@ -11,6 +12,7 @@ const VersionsPage: FC = () => {
   const [form, setForm] = useState({ version: "", platform: "Windows x64", changelog: "", file_url: "", file_size: 0, is_latest: false });
   const [uploading, setUploading] = useState(false);
   const [loading, setLoading] = useState(false);
+  const canManage = useAuthStore((s) => s.hasPerm)("version:create");
 
   const load = () => adminApi.listVersions().then(setVersions);
 
@@ -40,14 +42,17 @@ const VersionsPage: FC = () => {
     <div>
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 24 }}>
         <h2 style={{ fontSize: 18, fontWeight: 600, color: "#3d3630", margin: 0 }}>下载版本管理</h2>
-        <Button type="primary" icon={<PlusOutlined />} onClick={() => setOpen(true)}>新增版本</Button>
+        {canManage && (
+          <Button type="primary" icon={<PlusOutlined />} onClick={() => setOpen(true)}>新增版本</Button>
+        )}
       </div>
 
       <Table
         dataSource={versions}
         rowKey="id"
         loading={loading}
-        pagination={false}
+        pagination={{ pageSize: 20, showTotal: (t: number) => `共 ${t} 条` }}
+        scroll={{ y: "calc(100vh - 330px)" }}
         style={{ background: "#fff", borderRadius: 12 }}
         columns={[
           { title: "版本", dataIndex: "version", width: 100 },
@@ -56,12 +61,12 @@ const VersionsPage: FC = () => {
           { title: "文件大小", dataIndex: "file_size", width: 100, render: (v: number | null) => v ? `${(v / 1024 / 1024).toFixed(1)} MB` : "-" },
           { title: "最新", dataIndex: "is_latest", width: 80, render: (v: boolean) => v ? "✅" : "" },
           { title: "创建时间", dataIndex: "created_at", width: 170, render: (v: string) => new Date(v).toLocaleString("zh-CN") },
-          {
+          ...(canManage ? [{
             title: "操作", width: 80,
             render: (_: unknown, record: AdminVersion) => (
               <Button type="text" danger icon={<DeleteOutlined />} onClick={() => remove(record.id)} />
             ),
-          },
+          }] : []),
         ]}
       />
 

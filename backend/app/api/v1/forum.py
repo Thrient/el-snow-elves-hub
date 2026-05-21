@@ -441,7 +441,7 @@ async def delete_thread(
     t = (await db.execute(select(ForumPost).where(ForumPost.id == thread_id))).scalar_one_or_none()
     if not t:
         raise HTTPException(404, "帖子不存在")
-    if t.author_id != user.id and not user.has_permission("forum.manage"):
+    if t.author_id != user.id and not user.has_permission("forum:delete"):
         raise HTTPException(403, "无权删除")
 
     # If it's a thread, delete all replies too
@@ -473,7 +473,7 @@ async def admin_thread_action(
     user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
-    if not user.has_permission("forum.manage"):
+    if not user.has_permission("forum:manage"):
         raise HTTPException(403, "需要论坛管理权限")
 
     t = (await db.execute(select(ForumPost).where(ForumPost.id == thread_id))).scalar_one_or_none()

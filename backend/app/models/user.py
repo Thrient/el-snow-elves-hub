@@ -5,6 +5,7 @@ from sqlalchemy import DateTime, ForeignKey, Integer, String, func
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.core.database import Base
+from app.models.rbac import Role
 
 
 class User(Base):
@@ -15,21 +16,22 @@ class User(Base):
     email: Mapped[str] = mapped_column(String(255), unique=True, nullable=False, index=True)
     password_hash: Mapped[str] = mapped_column(String(255), nullable=False)
     avatar_id: Mapped[int | None] = mapped_column(ForeignKey("files.id"), nullable=True)
-    role_id: Mapped[int | None] = mapped_column(ForeignKey("roles.id"), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
 
-    role: Mapped["Role | None"] = relationship("Role", lazy="selectin")
+    roles: Mapped[list[Role]] = relationship(
+        secondary="user_roles", lazy="selectin"
+    )
     avatar: Mapped["File | None"] = relationship("File", foreign_keys=[avatar_id], lazy="selectin")
 
     def has_permission(self, code: str) -> bool:
-        """通过角色查权限"""
-        if not self.role or not self.role.permissions:
-            return False
-        perms = {p.code for p in self.role.permissions}
-        if "*" in perms:
-            return True
-        return code in perms
+        perms: set[str] = set()
+        for role in self.roles:
+            if not role.permissions:
+                continue
+            for p in role.permissions:
+                perms.add(p.code)
+        return "*" in perms or code in perms
 
     @property
     def avatar_url(self) -> str | None:
@@ -37,11 +39,15 @@ class User(Base):
         return file_url(self.avatar) if self.avatar else None
 
     @property
-    def role_name(self) -> str | None:
-        return self.role.name if self.role else None
+    def role_names(self) -> list[str]:
+        return [r.name for r in self.roles]
 
     @property
-    def permissions(self) -> list | None:
-        if not self.role or not self.role.permissions:
-            return None
-        return [p.code for p in self.role.permissions]
+    def permissions(self) -> list[str] | None:
+        perms: set[str] = set()
+        for role in self.roles:
+            if not role.permissions:
+                continue
+            for p in role.permissions:
+                perms.add(p.code)
+        return list(perms) if perms else None

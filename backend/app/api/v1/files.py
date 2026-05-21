@@ -6,9 +6,10 @@ from pydantic import BaseModel
 from sqlalchemy import select
 
 from app.core.database import get_db, async_session
-from app.core.deps import get_current_user
+from app.core.deps import get_current_user, get_optional_user
 from app.models.file import File
 from app.models.user import User
+from app.models.rbac import Role as RoleModel
 from app.utils.file_service import upload, file_url
 from app.utils.minio import stream_file
 
@@ -50,16 +51,36 @@ async def upload_file(
         return {"code": 0, "data": {"file_id": f.id, "url": file_url(f), "size": f.size}}
 
 
+async def _check_download_perm(user: User | None, db) -> None:
+    """检查下载权限：登录用户用自己的角色，匿名用户查 anonymous 角色"""
+    if user:
+        if not user.has_permission("version:download"):
+            raise HTTPException(403, "需要下载权限，请联系管理员分配")
+    else:
+        result = await db.execute(
+            select(RoleModel).where(RoleModel.name == "anonymous")
+        )
+        anon_role = result.scalar_one_or_none()
+        if not anon_role or not anon_role.permissions:
+            raise HTTPException(403, "请先登录后下载")
+        perms = {p.code for p in anon_role.permissions}
+        if "version:download" not in perms and "*" not in perms:
+            raise HTTPException(403, "暂未开放匿名下载，请登录后下载")
+
+
 @router.get("/{file_id}/download")
-async def download_file(file_id: int):
+async def download_file(
+    file_id: int,
+    user: User | None = Depends(get_optional_user),
+):
     """通过 ID 流式下载文件（代理 MinIO），支持浏览器进度条"""
     async with async_session() as db:
+        await _check_download_perm(user, db)
         f = (await db.execute(select(File).where(File.id == file_id))).scalar_one_or_none()
         if not f:
             raise HTTPException(404, "文件不存在")
         gen, ct, length = stream_file(f.key)
         encoded = quote(f.original_name or "download")
-        # RFC 5987 (modern) + traditional fallback for older browsers
         headers = {"Content-Disposition": f"attachment; filename=\"{encoded}\"; filename*=UTF-8''{encoded}"}
         if length:
             headers["Content-Length"] = str(length)

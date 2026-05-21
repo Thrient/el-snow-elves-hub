@@ -1,19 +1,23 @@
-"""管理后台 API — 仪表盘 / 用户管理 / 下载版本管理"""
+"""管理后台 API — 每个写操作端点挂对应权限"""
 
 from datetime import datetime
 from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel
-from sqlalchemy import select, func, delete
+from sqlalchemy import select, func, delete, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_db
 from app.core.deps import require_perm
 from app.models.user import User
 from app.models.download import DownloadVersion
-
 from app.models.task import Task as TaskModel
+from app.models.rbac import Role as RoleModel, Permission as PermissionModel, RolePermission, UserRole
 
-router = APIRouter(prefix="/admin", tags=["管理后台"], dependencies=[Depends(require_perm("admin.access"))])
+router = APIRouter(
+    prefix="/admin",
+    tags=["管理后台"],
+    dependencies=[Depends(require_perm("admin:access"))],
+)
 
 
 # ── Schemas ──
@@ -27,8 +31,8 @@ class UserItem(BaseModel):
     id: int
     username: str
     email: str
-    role_name: str | None = None
-    role_id: int | None = None
+    role_names: list = []
+    role_ids: list = []
     permissions: list | None = None
     created_at: datetime
 
@@ -57,46 +61,6 @@ class VersionItem(BaseModel):
     model_config = {"from_attributes": True}
 
 
-# ── Roles & Permissions ──
-
-from app.models.rbac import Role as RoleModel, Permission as PermissionModel, RolePermission
-
-@router.get("/roles")
-async def list_roles(db: AsyncSession = Depends(get_db)):
-    result = await db.execute(select(RoleModel))
-    roles = result.scalars().all()
-    return [{"id": r.id, "name": r.name, "description": r.description,
-             "permissions": [{"code": p.code, "name": p.name} for p in (r.permissions or [])]} for r in roles]
-
-
-@router.get("/permissions")
-async def list_permissions(db: AsyncSession = Depends(get_db)):
-    result = await db.execute(select(PermissionModel))
-    return [{"id": p.id, "code": p.code, "name": p.name} for p in result.scalars().all()]
-
-
-class PermUpdate(BaseModel):
-    permission_ids: list[int]
-
-
-@router.put("/roles/{role_id}/permissions")
-async def update_role_permissions(role_id: int, body: PermUpdate, db: AsyncSession = Depends(get_db)):
-    result = await db.execute(select(RoleModel).where(RoleModel.id == role_id))
-    role = result.scalar_one_or_none()
-    if not role:
-        raise HTTPException(status_code=404, detail="角色不存在")
-    # Clear old + insert new (avoids async lazy load)
-    await db.execute(delete(RolePermission).where(RolePermission.role_id == role_id))
-    for pid in body.permission_ids:
-        db.add(RolePermission(role_id=role_id, permission_id=pid))
-    await db.commit()
-    return {"ok": True}
-
-
-class UserRoleUpdate(BaseModel):
-    role_id: int
-
-
 # ── Dashboard ──
 
 @router.get("/stats", response_model=StatsResponse)
@@ -108,35 +72,165 @@ async def get_stats(db: AsyncSession = Depends(get_db)):
 
 # ── Users ──
 
-@router.get("/users", response_model=list[UserItem])
+@router.get("/users", response_model=list[UserItem],
+            dependencies=[Depends(require_perm("user:list"))])
 async def list_users(db: AsyncSession = Depends(get_db)):
     result = await db.execute(select(User).order_by(User.created_at.desc()))
     return [UserItem.model_validate(u) for u in result.scalars().all()]
 
 
-@router.put("/users/{user_id}/role")
-async def update_user_role(user_id: int, body: UserRoleUpdate, db: AsyncSession = Depends(get_db)):
+class UserRoleUpdate(BaseModel):
+    role_ids: list[int]
+
+
+@router.put("/users/{user_id}/roles",
+            dependencies=[Depends(require_perm("user:assign"))])
+async def update_user_roles(user_id: int, body: UserRoleUpdate, db: AsyncSession = Depends(get_db)):
     result = await db.execute(select(User).where(User.id == user_id))
     user = result.scalar_one_or_none()
     if not user:
         raise HTTPException(status_code=404, detail="用户不存在")
-    user.role_id = body.role_id
+    # clear old roles
+    await db.execute(delete(UserRole).where(UserRole.user_id == user_id))
+    for rid in body.role_ids:
+        db.add(UserRole(user_id=user_id, role_id=rid))
+    await db.commit()
+    return {"ok": True}
+
+
+# ── Roles ──
+
+@router.get("/roles", dependencies=[Depends(require_perm("role:list"))])
+async def list_roles(db: AsyncSession = Depends(get_db)):
+    result = await db.execute(select(RoleModel))
+    roles = result.scalars().all()
+    return [{"id": r.id, "name": r.name, "description": r.description,
+             "data_scope": r.data_scope,
+             "permissions": [{"code": p.code, "name": p.name} for p in (r.permissions or [])]} for r in roles]
+
+
+class PermUpdate(BaseModel):
+    permission_ids: list[int]
+
+
+@router.put("/roles/{role_id}/permissions",
+            dependencies=[Depends(require_perm("role:update"))])
+async def update_role_permissions(role_id: int, body: PermUpdate, db: AsyncSession = Depends(get_db)):
+    result = await db.execute(select(RoleModel).where(RoleModel.id == role_id))
+    role = result.scalar_one_or_none()
+    if not role:
+        raise HTTPException(status_code=404, detail="角色不存在")
+    await db.execute(delete(RolePermission).where(RolePermission.role_id == role_id))
+    for pid in body.permission_ids:
+        db.add(RolePermission(role_id=role_id, permission_id=pid))
+    await db.commit()
+    return {"ok": True}
+
+
+class RoleCreate(BaseModel):
+    name: str
+    description: str | None = None
+
+
+@router.post("/roles", status_code=status.HTTP_201_CREATED,
+             dependencies=[Depends(require_perm("role:create"))])
+async def create_role(body: RoleCreate, db: AsyncSession = Depends(get_db)):
+    existing = (await db.execute(select(RoleModel).where(RoleModel.name == body.name))).scalar_one_or_none()
+    if existing:
+        raise HTTPException(status_code=400, detail="角色名已存在")
+    role = RoleModel(name=body.name, description=body.description)
+    db.add(role)
+    await db.commit()
+    await db.refresh(role)
+    return {"id": role.id, "name": role.name, "description": role.description, "permissions": []}
+
+
+@router.delete("/roles/{role_id}",
+               dependencies=[Depends(require_perm("role:delete"))])
+async def delete_role(role_id: int, db: AsyncSession = Depends(get_db)):
+    result = await db.execute(select(RoleModel).where(RoleModel.id == role_id))
+    role = result.scalar_one_or_none()
+    if not role:
+        raise HTTPException(status_code=404, detail="角色不存在")
+    # unlink users first
+    await db.execute(delete(UserRole).where(UserRole.role_id == role_id))
+    await db.delete(role)
+    await db.commit()
+    return {"ok": True}
+
+
+# ── Permissions ──
+
+@router.get("/permissions", dependencies=[Depends(require_perm("perm:list"))])
+async def list_permissions(db: AsyncSession = Depends(get_db)):
+    result = await db.execute(select(PermissionModel))
+    return [{"id": p.id, "code": p.code, "name": p.name} for p in result.scalars().all()]
+
+
+class PermCreate(BaseModel):
+    code: str
+    name: str
+
+
+@router.post("/permissions", status_code=status.HTTP_201_CREATED,
+             dependencies=[Depends(require_perm("perm:create"))])
+async def create_permission(body: PermCreate, db: AsyncSession = Depends(get_db)):
+    existing = (await db.execute(select(PermissionModel).where(PermissionModel.code == body.code))).scalar_one_or_none()
+    if existing:
+        raise HTTPException(status_code=400, detail="权限码已存在")
+    perm = PermissionModel(code=body.code, name=body.name)
+    db.add(perm)
+    await db.commit()
+    await db.refresh(perm)
+    return {"id": perm.id, "code": perm.code, "name": perm.name}
+
+
+@router.put("/permissions/{perm_id}",
+            dependencies=[Depends(require_perm("perm:update"))])
+async def update_permission(perm_id: int, body: PermCreate, db: AsyncSession = Depends(get_db)):
+    result = await db.execute(select(PermissionModel).where(PermissionModel.id == perm_id))
+    perm = result.scalar_one_or_none()
+    if not perm:
+        raise HTTPException(status_code=404, detail="权限不存在")
+    if body.code != perm.code:
+        dup = (await db.execute(select(PermissionModel).where(PermissionModel.code == body.code))).scalar_one_or_none()
+        if dup:
+            raise HTTPException(status_code=400, detail="权限码已存在")
+        perm.code = body.code
+    perm.name = body.name
+    await db.commit()
+    await db.refresh(perm)
+    return {"id": perm.id, "code": perm.code, "name": perm.name}
+
+
+@router.delete("/permissions/{perm_id}",
+               dependencies=[Depends(require_perm("perm:delete"))])
+async def delete_permission(perm_id: int, db: AsyncSession = Depends(get_db)):
+    result = await db.execute(select(PermissionModel).where(PermissionModel.id == perm_id))
+    perm = result.scalar_one_or_none()
+    if not perm:
+        raise HTTPException(status_code=404, detail="权限不存在")
+    if perm.code == "*":
+        raise HTTPException(status_code=400, detail="不能删除超级管理员权限")
+    await db.execute(delete(RolePermission).where(RolePermission.permission_id == perm_id))
+    await db.delete(perm)
     await db.commit()
     return {"ok": True}
 
 
 # ── Download Versions ──
 
-@router.get("/versions", response_model=list[VersionItem])
+@router.get("/versions", response_model=list[VersionItem],
+            dependencies=[Depends(require_perm("version:list"))])
 async def list_versions(db: AsyncSession = Depends(get_db)):
     result = await db.execute(select(DownloadVersion).order_by(DownloadVersion.created_at.desc()))
     return [VersionItem.model_validate(v) for v in result.scalars().all()]
 
 
-@router.post("/versions", status_code=status.HTTP_201_CREATED)
+@router.post("/versions", status_code=status.HTTP_201_CREATED,
+             dependencies=[Depends(require_perm("version:create"))])
 async def create_version(body: VersionCreate, db: AsyncSession = Depends(get_db)):
     if body.is_latest:
-        # 取消旧的最新标记
         old = (await db.execute(select(DownloadVersion).where(DownloadVersion.is_latest == True))).scalars().all()
         for o in old:
             o.is_latest = False
@@ -147,7 +241,8 @@ async def create_version(body: VersionCreate, db: AsyncSession = Depends(get_db)
     return {"ok": True, "id": v.id}
 
 
-@router.delete("/versions/{version_id}")
+@router.delete("/versions/{version_id}",
+               dependencies=[Depends(require_perm("version:delete"))])
 async def delete_version(version_id: int, db: AsyncSession = Depends(get_db)):
     result = await db.execute(select(DownloadVersion).where(DownloadVersion.id == version_id))
     v = result.scalar_one_or_none()
@@ -158,40 +253,9 @@ async def delete_version(version_id: int, db: AsyncSession = Depends(get_db)):
     return {"ok": True}
 
 
-# ── Task audit ──
+# ── Tasks ──
 
-@router.get("/tasks/pending")
-async def list_pending_tasks(db: AsyncSession = Depends(get_db)):
-    result = await db.execute(
-        select(TaskModel).where(TaskModel.status == "pending").order_by(TaskModel.created_at.desc())
-    )
-    tasks = result.scalars().all()
-    return [{"id": t.id, "title": t.title, "author_id": t.author_id, "category": t.category, "version": t.version, "file_size": t.file_size, "created_at": t.created_at.isoformat()} for t in tasks]
-
-
-@router.post("/tasks/{task_id}/approve")
-async def approve_task(task_id: int, reason: str = "", db: AsyncSession = Depends(get_db)):
-    result = await db.execute(select(TaskModel).where(TaskModel.id == task_id))
-    t = result.scalar_one_or_none()
-    if not t:
-        raise HTTPException(status_code=404, detail="任务不存在")
-    t.status = "approved"
-    await db.commit()
-    return {"ok": True}
-
-
-@router.post("/tasks/{task_id}/reject")
-async def reject_task(task_id: int, reason: str = "", db: AsyncSession = Depends(get_db)):
-    result = await db.execute(select(TaskModel).where(TaskModel.id == task_id))
-    t = result.scalar_one_or_none()
-    if not t:
-        raise HTTPException(status_code=404, detail="任务不存在")
-    t.status = "rejected"
-    await db.commit()
-    return {"ok": True}
-
-
-@router.get("/tasks")
+@router.get("/tasks", dependencies=[Depends(require_perm("task:list"))])
 async def list_all_tasks(db: AsyncSession = Depends(get_db)):
     result = await db.execute(
         select(TaskModel).order_by(TaskModel.created_at.desc())
@@ -203,7 +267,8 @@ async def list_all_tasks(db: AsyncSession = Depends(get_db)):
              "created_at": t.created_at.isoformat()} for t in tasks]
 
 
-@router.put("/tasks/{task_id}/status")
+@router.put("/tasks/{task_id}/status",
+            dependencies=[Depends(require_perm("task:approve"))])
 async def update_task_status(task_id: int, body: dict, db: AsyncSession = Depends(get_db)):
     result = await db.execute(select(TaskModel).where(TaskModel.id == task_id))
     t = result.scalar_one_or_none()
@@ -215,7 +280,8 @@ async def update_task_status(task_id: int, body: dict, db: AsyncSession = Depend
     return {"ok": True}
 
 
-@router.delete("/tasks/{task_id}")
+@router.delete("/tasks/{task_id}",
+               dependencies=[Depends(require_perm("task:delete"))])
 async def delete_task(task_id: int, db: AsyncSession = Depends(get_db)):
     result = await db.execute(select(TaskModel).where(TaskModel.id == task_id))
     t = result.scalar_one_or_none()
@@ -232,7 +298,8 @@ from app.models.route import Route as RouteModel
 from app.schemas.route import RouteAdmin, RouteCreate, RouteUpdate, RouteToggle
 
 
-@router.get("/routes", response_model=list[RouteAdmin])
+@router.get("/routes", response_model=list[RouteAdmin],
+            dependencies=[Depends(require_perm("route:list"))])
 async def list_routes(db: AsyncSession = Depends(get_db)):
     result = await db.execute(
         select(RouteModel).order_by(RouteModel.sort_order)
@@ -240,7 +307,8 @@ async def list_routes(db: AsyncSession = Depends(get_db)):
     return [RouteAdmin.model_validate(r) for r in result.scalars().all()]
 
 
-@router.post("/routes", status_code=status.HTTP_201_CREATED, response_model=RouteAdmin)
+@router.post("/routes", status_code=status.HTTP_201_CREATED, response_model=RouteAdmin,
+             dependencies=[Depends(require_perm("route:create"))])
 async def create_route(body: RouteCreate, db: AsyncSession = Depends(get_db)):
     existing = (await db.execute(
         select(RouteModel).where(RouteModel.path == body.path)
@@ -260,7 +328,8 @@ async def create_route(body: RouteCreate, db: AsyncSession = Depends(get_db)):
     return RouteAdmin.model_validate(route)
 
 
-@router.put("/routes/{route_id}", response_model=RouteAdmin)
+@router.put("/routes/{route_id}", response_model=RouteAdmin,
+            dependencies=[Depends(require_perm("route:update"))])
 async def update_route(route_id: int, body: RouteUpdate, db: AsyncSession = Depends(get_db)):
     result = await db.execute(
         select(RouteModel).where(RouteModel.id == route_id)
@@ -275,7 +344,8 @@ async def update_route(route_id: int, body: RouteUpdate, db: AsyncSession = Depe
     return RouteAdmin.model_validate(route)
 
 
-@router.delete("/routes/{route_id}")
+@router.delete("/routes/{route_id}",
+               dependencies=[Depends(require_perm("route:delete"))])
 async def delete_route(route_id: int, db: AsyncSession = Depends(get_db)):
     result = await db.execute(
         select(RouteModel).where(RouteModel.id == route_id)
@@ -288,7 +358,8 @@ async def delete_route(route_id: int, db: AsyncSession = Depends(get_db)):
     return {"ok": True}
 
 
-@router.put("/routes/{route_id}/toggle")
+@router.put("/routes/{route_id}/toggle",
+            dependencies=[Depends(require_perm("route:toggle"))])
 async def toggle_route(route_id: int, body: RouteToggle, db: AsyncSession = Depends(get_db)):
     result = await db.execute(
         select(RouteModel).where(RouteModel.id == route_id)

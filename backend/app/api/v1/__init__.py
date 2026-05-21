@@ -86,7 +86,8 @@ async def get_routes(
     # 构建树结构
     route_map = {r.id: RoutePublic(
         id=r.id, path=r.path, title=r.title, icon=r.icon,
-        parent_id=r.parent_id, perm=r.perm, component=r.component
+        parent_id=r.parent_id, perm=r.perm, in_menu=r.in_menu,
+        component=r.component,
     ) for r in visible}
 
     roots: list[RoutePublic] = []

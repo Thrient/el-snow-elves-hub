@@ -162,7 +162,7 @@ const ForumThreadPage: FC = () => {
   if (loading) return <div style={{ textAlign: "center", padding: 80 }}><Spin size="large" /></div>;
   if (!thread) return <div style={{ textAlign: "center", padding: 80, color: "#b8afa6" }}>帖子不存在</div>;
 
-  const canManage = hasPerm("forum.manage");
+  const canManage = hasPerm("forum:manage");
   const isThreadAuthor = user?.id === thread.author?.id;
 
   return (

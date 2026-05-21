@@ -11,6 +11,7 @@ class RoutePublic(BaseModel):
     icon: str | None = None
     parent_id: int | None = None
     perm: str | None = None
+    in_menu: bool = True
     component: str | None = None
     children: list["RoutePublic"] = []
 
@@ -26,6 +27,7 @@ class RouteAdmin(BaseModel):
     parent_id: int | None = None
     perm: str | None = None
     enabled: bool = True
+    in_menu: bool = True
     sort_order: int = 0
     component: str | None = None
     created_at: datetime
@@ -42,6 +44,7 @@ class RouteCreate(BaseModel):
     parent_id: int | None = None
     perm: str | None = None
     enabled: bool = True
+    in_menu: bool = True
     sort_order: int = 0
     component: str | None = None
 
@@ -54,6 +57,7 @@ class RouteUpdate(BaseModel):
     parent_id: int | None = None
     perm: str | None = None
     enabled: bool | None = None
+    in_menu: bool | None = None
     sort_order: int | None = None
     component: str | None = None
 

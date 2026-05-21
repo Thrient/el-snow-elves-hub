@@ -97,18 +97,20 @@ export function useDynamicMenuItems(): MenuItem[] {
   const routes = useRoutesStore((s) => s.routes);
 
   function buildMenu(items: RoutePublic[]): MenuItem[] {
-    return items.map((route) => {
-      const IconComp = resolveIcon(route.icon);
-      const item: MenuItem = {
-        key: route.path,
-        icon: IconComp ? <IconComp /> : undefined,
-        label: route.title,
-      };
-      if (route.children && route.children.length > 0) {
-        item.children = buildMenu(route.children);
-      }
-      return item;
-    });
+    return items
+      .filter((r) => r.in_menu)
+      .map((route) => {
+        const IconComp = resolveIcon(route.icon);
+        const item: MenuItem = {
+          key: route.path,
+          icon: IconComp ? <IconComp /> : undefined,
+          label: route.title,
+        };
+        if (route.children && route.children.length > 0) {
+          item.children = buildMenu(route.children);
+        }
+        return item;
+      });
   }
 
   return buildMenu(routes);

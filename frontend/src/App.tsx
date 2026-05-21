@@ -59,13 +59,15 @@ const AppShell: FC = () => {
 
   const routes = useDynamicRoutes();
   const menuItems = useDynamicMenuItems();
+  const routeElement = useRoutes(routes);
 
   return (
-    <Layout style={{ minHeight: "100vh", background: "#faf8f5", overflow: "hidden" }}>
+    <Layout style={{ height: "100vh", display: "flex", flexDirection: "column", background: "#faf8f5", overflow: "hidden" }}>
       <Header
         style={{
           display: "flex",
           alignItems: "center",
+          flexShrink: 0,
           background: "#fff",
           borderBottom: "1px solid #e8e3dc",
           padding: "0 24px",
@@ -178,15 +180,15 @@ const AppShell: FC = () => {
         </div>
       </Header>
 
-      <Content style={{ padding: "24px", maxWidth: 1200, margin: "0 auto", width: "100%" }}>
+      <Content style={{ flex: 1, minHeight: 0, overflow: "auto", display: "flex", flexDirection: "column", padding: "24px", maxWidth: 1200, margin: "0 auto", width: "100%" }}>
         {routesLoading ? (
           <Spin size="large" style={{ display: "block", marginTop: "20vh" }} />
         ) : (
-          useRoutes(routes)
+          routeElement
         )}
       </Content>
 
-      <Footer style={{ textAlign: "center", color: "#b8afa6", fontSize: 12, background: "transparent" }}>
+      <Footer style={{ flexShrink: 0, height: 40, padding: "10px 50px", display: "flex", alignItems: "center", justifyContent: "center", textAlign: "center", color: "#b8afa6", fontSize: 12, background: "transparent" }}>
         时雪-创意工坊 © {new Date().getFullYear()}
       </Footer>
     </Layout>

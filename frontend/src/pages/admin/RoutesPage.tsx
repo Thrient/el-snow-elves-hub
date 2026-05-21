@@ -2,16 +2,26 @@ import { useEffect, useState, type FC } from "react";
 import { Table, Button, Modal, Input, Select, InputNumber, Switch, message, Tag, Popconfirm, Space } from "antd";
 import { PlusOutlined, EditOutlined, DeleteOutlined } from "@ant-design/icons";
 import { adminApi, type RouteAdmin, type PermItem } from "../../api/admin";
+import { useAuthStore } from "../../store/auth";
 import iconMap from "../../components/IconResolver";
-import componentRegistry from "../../registry";
 
 const iconOptions = Object.keys(iconMap).map((k) => ({ value: k, label: k }));
-const componentOptions = Object.keys(componentRegistry).map((k) => ({ value: k, label: k }));
+
+const COMPONENT_NAMES = [
+  "HomePage", "DownloadPage", "ForumPage", "ForumBoardPage", "ForumThreadPage",
+  "ForumCreatePage", "ForumSearchPage", "MarketPage", "TaskDetailPage", "RankingPage",
+  "AuthorPage", "UploadPage", "ProfilePage", "LoginPage", "NotificationsPage",
+  "AdminLayout", "DashboardPage", "UsersPage", "RolesPage", "PermissionsPage",
+  "VersionsPage", "TasksPage", "RoutesPage", "GenericPage",
+];
+const componentOptions = COMPONENT_NAMES.map((k) => ({ value: k, label: k }));
 
 const RoutesPage: FC = () => {
   const [routes, setRoutes] = useState<RouteAdmin[]>([]);
   const [allPerms, setAllPerms] = useState<PermItem[]>([]);
   const [loading, setLoading] = useState(false);
+  const hasPerm = useAuthStore((s) => s.hasPerm);
+  const canManage = hasPerm("route:create");
   const [modalOpen, setModalOpen] = useState(false);
   const [editing, setEditing] = useState<RouteAdmin | null>(null);
 
@@ -22,6 +32,7 @@ const RoutesPage: FC = () => {
   const [formParentId, setFormParentId] = useState<number | undefined>(undefined);
   const [formPerm, setFormPerm] = useState<string | undefined>(undefined);
   const [formEnabled, setFormEnabled] = useState(true);
+  const [formInMenu, setFormInMenu] = useState(true);
   const [formSortOrder, setFormSortOrder] = useState(0);
   const [formComponent, setFormComponent] = useState<string | undefined>(undefined);
   const [saving, setSaving] = useState(false);
@@ -50,6 +61,7 @@ const RoutesPage: FC = () => {
     setFormParentId(undefined);
     setFormPerm(undefined);
     setFormEnabled(true);
+    setFormInMenu(true);
     setFormSortOrder(0);
     setFormComponent(undefined);
   };
@@ -68,6 +80,7 @@ const RoutesPage: FC = () => {
     setFormParentId(route.parent_id || undefined);
     setFormPerm(route.perm || undefined);
     setFormEnabled(route.enabled);
+    setFormInMenu(route.in_menu);
     setFormSortOrder(route.sort_order);
     setFormComponent(route.component || undefined);
     setModalOpen(true);
@@ -87,6 +100,7 @@ const RoutesPage: FC = () => {
         parent_id: formParentId || null,
         perm: formPerm || null,
         enabled: formEnabled,
+        in_menu: formInMenu,
         sort_order: formSortOrder,
         component: formComponent || null,
       };
@@ -110,7 +124,15 @@ const RoutesPage: FC = () => {
     try {
       await adminApi.toggleRoute(id, enabled);
       setRoutes((prev) => prev.map((r) => (r.id === id ? { ...r, enabled } : r)));
-      message.success(enabled ? "已启用" : "已禁用");
+    } catch {
+      message.error("操作失败");
+    }
+  };
+
+  const toggleInMenu = async (id: number, in_menu: boolean) => {
+    try {
+      await adminApi.updateRoute(id, { in_menu } as any);
+      setRoutes((prev) => prev.map((r) => (r.id === id ? { ...r, in_menu } : r)));
     } catch {
       message.error("操作失败");
     }
@@ -136,70 +158,50 @@ const RoutesPage: FC = () => {
     <div>
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 24 }}>
         <h2 style={{ fontSize: 18, fontWeight: 600, color: "#3d3630", margin: 0 }}>路由管理</h2>
-        <Button type="primary" icon={<PlusOutlined />} onClick={openCreate}>
-          新建路由
-        </Button>
+        {canManage && (
+          <Button type="primary" icon={<PlusOutlined />} onClick={openCreate}>
+            新建路由
+          </Button>
+        )}
       </div>
 
       <Table
         dataSource={routes}
         rowKey="id"
         loading={loading}
-        pagination={false}
+        pagination={{ pageSize: 15, showSizeChanger: false, showTotal: (t: number) => `共 ${t} 条` }}
+        scroll={{ y: "calc(100vh - 330px)" }}
         style={{ background: "#fff", borderRadius: 12 }}
         columns={[
           { title: "ID", dataIndex: "id", width: 50 },
-          { title: "路径", dataIndex: "path", width: 160 },
-          { title: "标题", dataIndex: "title", width: 100 },
+          { title: "路径", dataIndex: "path", width: 140, ellipsis: true },
+          { title: "标题", dataIndex: "title", width: 80 },
+          { title: "父级", dataIndex: "parent_id", width: 100, render: (v: number | null) => getParentPath(v) },
           {
-            title: "图标",
-            dataIndex: "icon",
-            width: 100,
-            render: (v: string | null) => v || "-",
-          },
-          {
-            title: "父级",
-            dataIndex: "parent_id",
-            width: 120,
-            render: (v: number | null) => getParentPath(v),
-          },
-          {
-            title: "权限",
-            dataIndex: "perm",
-            width: 120,
+            title: "权限", dataIndex: "perm", width: 100,
             render: (v: string | null) =>
               v ? <Tag>{v}</Tag> : <span style={{ color: "#b8afa6", fontSize: 11 }}>公开</span>,
           },
-          {
-            title: "启用",
-            dataIndex: "enabled",
-            width: 60,
+          ...(canManage ? [
+            {
+              title: "启用", dataIndex: "enabled", width: 55,
+              render: (_: unknown, record: RouteAdmin) => (
+                <Switch size="small" checked={record.enabled} onChange={(v) => toggleEnabled(record.id, v)} />
+              ),
+            },
+            {
+              title: "导航", dataIndex: "in_menu", width: 55,
+              render: (_: unknown, record: RouteAdmin) => (
+                <Switch size="small" checked={record.in_menu} onChange={(v) => toggleInMenu(record.id, v)} />
+              ),
+            },
+          ] : []),
+          { title: "排序", dataIndex: "sort_order", width: 50 },
+          ...(canManage ? [{
+            title: "操作", width: 80,
             render: (_: unknown, record: RouteAdmin) => (
-              <Switch
-                size="small"
-                checked={record.enabled}
-                onChange={(v) => toggleEnabled(record.id, v)}
-              />
-            ),
-          },
-          {
-            title: "组件",
-            dataIndex: "component",
-            width: 120,
-            render: (v: string | null) => v || "-",
-          },
-          { title: "排序", dataIndex: "sort_order", width: 60 },
-          {
-            title: "操作",
-            width: 130,
-            render: (_: unknown, record: RouteAdmin) => (
-              <Space size="small">
-                <Button
-                  size="small"
-                  type="text"
-                  icon={<EditOutlined />}
-                  onClick={() => openEdit(record)}
-                />
+              <Space size={4}>
+                <Button size="small" type="text" icon={<EditOutlined />} onClick={() => openEdit(record)} />
                 <Popconfirm
                   title="确定删除此路由?"
                   onConfirm={() => deleteRoute(record.id)}
@@ -210,9 +212,8 @@ const RoutesPage: FC = () => {
                 </Popconfirm>
               </Space>
             ),
-          },
+          }] : []),
         ]}
-        scroll={{ x: 1200 }}
       />
 
       <Modal
@@ -308,6 +309,10 @@ const RoutesPage: FC = () => {
             <div style={{ paddingTop: 20 }}>
               <Switch checked={formEnabled} onChange={setFormEnabled} />{" "}
               <span style={{ fontSize: 12, color: "#6b5e55", marginLeft: 4 }}>{formEnabled ? "启用" : "禁用"}</span>
+            </div>
+            <div style={{ paddingTop: 20 }}>
+              <Switch checked={formInMenu} onChange={setFormInMenu} />{" "}
+              <span style={{ fontSize: 12, color: "#6b5e55", marginLeft: 4 }}>{formInMenu ? "导航显示" : "导航隐藏"}</span>
             </div>
           </div>
         </div>

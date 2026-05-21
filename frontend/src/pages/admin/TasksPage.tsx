@@ -1,6 +1,7 @@
 import { useEffect, useState, type FC } from "react";
-import { Table, Button, Select, message, Popconfirm, Tag, Modal, Descriptions } from "antd";
+import { Table, Button, Select, message, Popconfirm, Tag, Modal, Descriptions, Space } from "antd";
 import { DeleteOutlined, EyeOutlined } from "@ant-design/icons";
+import { useAuthStore } from "../../store/auth";
 import axios from "axios";
 
 const API = axios.create({ baseURL: "/api/v1" });
@@ -33,6 +34,9 @@ const TasksPage: FC = () => {
   const [tasks, setTasks] = useState<AdminTask[]>([]);
   const [loading, setLoading] = useState(false);
   const [detail, setDetail] = useState<AdminTask | null>(null);
+  const hasPerm = useAuthStore((s) => s.hasPerm);
+  const canApprove = hasPerm("task:approve");
+  const canDelete = hasPerm("task:delete");
 
   const load = () =>
     API.get("/admin/tasks").then((r) => setTasks(r.data));
@@ -53,12 +57,13 @@ const TasksPage: FC = () => {
 
   return (
     <div>
-      <h2 style={{ fontSize: 18, fontWeight: 600, color: "#3d3630", marginBottom: 24 }}>任务管理</h2>
+      <h2 style={{ fontSize: 18, fontWeight: 600, color: "#3d3630", margin: "0 0 24px" }}>任务管理</h2>
       <Table
         dataSource={tasks}
         rowKey="id"
         loading={loading}
         pagination={{ pageSize: 20 }}
+        scroll={{ y: "calc(100vh - 330px)" }}
         style={{ background: "#fff", borderRadius: 12 }}
         columns={[
           { title: "ID", dataIndex: "id", width: 50 },
@@ -75,25 +80,29 @@ const TasksPage: FC = () => {
           { title: "下载", dataIndex: "download_count", width: 60 },
           { title: "点赞", dataIndex: "like_count", width: 60 },
           {
-            title: "操作", width: 220,
+            title: "操作", width: canDelete ? 220 : 130,
             render: (_: unknown, record: AdminTask) => (
-              <div style={{ display: "flex", gap: 4 }}>
-                <Select
-                  size="small"
-                  value={record.status}
-                  style={{ width: 90 }}
-                  onChange={(v) => changeStatus(record.id, v)}
-                  options={[
-                    { value: "approved", label: "已上架" },
-                    { value: "pending", label: "待审核" },
-                    { value: "rejected", label: "已驳回" },
-                  ]}
-                />
+              <Space size={4}>
+                {canApprove && (
+                  <Select
+                    size="small"
+                    value={record.status}
+                    style={{ width: 90 }}
+                    onChange={(v) => changeStatus(record.id, v)}
+                    options={[
+                      { value: "approved", label: "已上架" },
+                      { value: "pending", label: "待审核" },
+                      { value: "rejected", label: "已驳回" },
+                    ]}
+                  />
+                )}
                 <Button size="small" type="text" icon={<EyeOutlined />} onClick={() => setDetail(record)} />
-                <Popconfirm title="确认删除此任务？" onConfirm={() => remove(record.id)}>
-                  <Button size="small" type="text" danger icon={<DeleteOutlined />} />
-                </Popconfirm>
-              </div>
+                {canDelete && (
+                  <Popconfirm title="确认删除此任务？" onConfirm={() => remove(record.id)}>
+                    <Button size="small" type="text" danger icon={<DeleteOutlined />} />
+                  </Popconfirm>
+                )}
+              </Space>
             ),
           },
         ]}

@@ -21,7 +21,7 @@ const AdminLayout: FC = () => {
   if (!user) {
     return <Result status="403" title="请先登录" extra={<Button type="primary" onClick={() => navigate("/login")}>去登录</Button>} />;
   }
-  if (!hasPerm("admin.access")) {
+  if (!hasPerm("admin:access")) {
     return <Result status="403" title="无权限" subTitle="需要管理员权限" extra={<Button onClick={() => navigate("/")}>返回首页</Button>} />;
   }
 
@@ -35,7 +35,7 @@ const AdminLayout: FC = () => {
   });
 
   return (
-    <Layout style={{ minHeight: "calc(100vh - 52px - 70px)", background: "#faf8f5" }}>
+    <Layout style={{ flex: 1, minHeight: 0, background: "#faf8f5" }}>
       <Sider width={200} style={{ background: "#fff", borderRight: "1px solid #e8e3dc" }}>
         <div style={{ padding: "16px 20px", fontWeight: 600, fontSize: 13, color: "#6b5e55", borderBottom: "1px solid #e8e3dc" }}>
           管理后台
@@ -47,13 +47,13 @@ const AdminLayout: FC = () => {
           onClick={({ key }) => navigate(key)}
           style={{ border: "none", paddingTop: 8 }}
         />
-        <div style={{ position: "absolute", bottom: 16, left: 0, right: 0, padding: "0 16px" }}>
+        <div style={{ padding: "12px 16px" }}>
           <Button type="text" icon={<ArrowLeftOutlined />} onClick={() => navigate("/")} block style={{ color: "#b8afa6" }}>
             返回前台
           </Button>
         </div>
       </Sider>
-      <Content style={{ padding: 24, overflow: "auto" }}>
+      <Content style={{ flex: 1, minHeight: 0, overflow: "hidden", padding: 24 }}>
         <Outlet />
       </Content>
     </Layout>

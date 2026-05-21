@@ -12,7 +12,7 @@ const DashboardPage: FC = () => {
 
   return (
     <div>
-      <h2 style={{ fontSize: 18, fontWeight: 600, color: "#3d3630", marginBottom: 24 }}>仪表盘</h2>
+      <h2 style={{ fontSize: 18, fontWeight: 600, color: "#3d3630", margin: "0 0 24px" }}>仪表盘</h2>
       <Row gutter={[16, 16]}>
         <Col xs={24} sm={12}>
           <Card hoverable style={{ borderRadius: 12 }}>

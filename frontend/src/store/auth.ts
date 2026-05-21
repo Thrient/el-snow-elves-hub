@@ -8,7 +8,7 @@ export interface AuthUser {
   username: string;
   email: string;
   avatar_url: string | null;
-  role_name: string | null;
+  role_names: string[];
   permissions: string[] | null;
 }
 

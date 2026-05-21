@@ -1,6 +1,5 @@
-import { lazy, type ComponentType } from "react";
+import { type ComponentType } from "react";
 
-// ── Eagerly imported pages ──
 import HomePage from "./pages/HomePage";
 import DownloadPage from "./pages/DownloadPage";
 import ForumPage from "./pages/ForumPage";
@@ -23,10 +22,8 @@ import RolesPage from "./pages/admin/RolesPage";
 import PermissionsPage from "./pages/admin/PermissionsPage";
 import VersionsPage from "./pages/admin/VersionsPage";
 import TasksPage from "./pages/admin/TasksPage";
-
-// ── Lazily loaded pages ──
-const GenericPage = lazy(() => import("./pages/GenericPage"));
-const RoutesPage = lazy(() => import("./pages/admin/RoutesPage"));
+import GenericPage from "./pages/GenericPage";
+import RoutesPage from "./pages/admin/RoutesPage";
 
 const componentRegistry: Record<string, ComponentType<any>> = {
   HomePage,

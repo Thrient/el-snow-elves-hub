@@ -75,7 +75,7 @@ const ProfilePage: FC = () => {
             ) : (
               <>
                 <Title level={4} style={{ margin: 0, color: "#3d3630" }}>{user.username}</Title>
-                <div style={{ fontSize: 13, color: "#b8afa6", marginTop: 4 }}>{user.email} · {user.role_name === "admin" ? "管理员" : "用户"}</div>
+                <div style={{ fontSize: 13, color: "#b8afa6", marginTop: 4 }}>{user.email} · {user.role_names?.includes("admin") ? "管理员" : "用户"}</div>
               </>
             )}
           </div>

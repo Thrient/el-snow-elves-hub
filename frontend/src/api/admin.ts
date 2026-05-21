@@ -44,8 +44,8 @@ export interface AdminUser {
   id: number;
   username: string;
   email: string;
-  role_name: string | null;
-  role_id: number | null;
+  role_names: string[];
+  role_ids: number[];
   permissions: string[] | null;
   created_at: string;
 }
@@ -95,6 +95,7 @@ export interface RouteAdmin {
   parent_id: number | null;
   perm: string | null;
   enabled: boolean;
+  in_menu: boolean;
   sort_order: number;
   component: string | null;
   created_at: string;
@@ -107,16 +108,24 @@ export const adminApi = {
 
   // Users
   listUsers: () => API.get<AdminUser[]>("/admin/users").then((r) => r.data),
-  updateUserRole: (userId: number, roleId: number) =>
-    API.put(`/admin/users/${userId}/role`, { role_id: roleId }),
+  updateUserRoles: (userId: number, roleIds: number[]) =>
+    API.put(`/admin/users/${userId}/roles`, { role_ids: roleIds }),
 
   // Roles
   listRoles: () => API.get<RoleItem[]>("/admin/roles").then((r) => r.data),
+  createRole: (data: { name: string; description?: string }) =>
+    API.post("/admin/roles", data).then((r) => r.data),
   updateRolePermissions: (roleId: number, permissionIds: number[]) =>
     API.put(`/admin/roles/${roleId}/permissions`, { permission_ids: permissionIds }),
+  deleteRole: (id: number) => API.delete(`/admin/roles/${id}`),
 
-  // Permissions (read-only)
+  // Permissions
   listPermissions: () => API.get<PermItem[]>("/admin/permissions").then((r) => r.data),
+  createPermission: (data: { code: string; name: string }) =>
+    API.post("/admin/permissions", data).then((r) => r.data),
+  updatePermission: (id: number, data: { code: string; name: string }) =>
+    API.put(`/admin/permissions/${id}`, data).then((r) => r.data),
+  deletePermission: (id: number) => API.delete(`/admin/permissions/${id}`),
 
   // Versions
   listVersions: () => API.get<AdminVersion[]>("/admin/versions").then((r) => r.data),
@@ -131,8 +140,8 @@ export const adminApi = {
 
   // Tasks
   listTasks: () => API.get<AdminTask[]>("/admin/tasks").then((r) => r.data),
-  approveTask: (id: number) => API.post(`/admin/tasks/${id}/approve`),
-  rejectTask: (id: number) => API.post(`/admin/tasks/${id}/reject`),
+  updateTaskStatus: (id: number, status: string) =>
+    API.put(`/admin/tasks/${id}/status`, { status }),
   deleteTask: (id: number) => API.delete(`/admin/tasks/${id}`),
 
   // Routes
