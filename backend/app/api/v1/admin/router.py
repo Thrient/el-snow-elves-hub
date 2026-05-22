@@ -1,16 +1,19 @@
 """管理后台 API — 每个写操作端点挂对应权限"""
 
 from datetime import datetime
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, File, HTTPException, UploadFile, status
 from pydantic import BaseModel
 from sqlalchemy import select, func, delete, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.database import get_db
-from app.core.deps import require_perm
+from app.core.database import async_session, get_db
+from app.core.deps import get_current_user, require_perm
+from app.utils.fingerprint_service import ensure_fingerprint
 from app.models.user import User
 from app.models.download import DownloadVersion
+from app.models.fingerprint import Fingerprint
 from app.models.task import Task as TaskModel
+from app.models.version_file import VersionFile
 from app.models.rbac import Role as RoleModel, Permission as PermissionModel, RolePermission, UserRole
 
 router = APIRouter(
@@ -65,6 +68,21 @@ class VersionItem(BaseModel):
     file_count: int | None = None  # populated by query join
 
     model_config = {"from_attributes": True}
+
+
+class BlobCheckRequest(BaseModel):
+    sha256_list: list[str]
+
+
+class BlobCheckResponse(BaseModel):
+    existing: list[str]
+    missing: list[str]
+
+
+class BlobUploadResponse(BaseModel):
+    fingerprint_id: int
+    sha256: str
+    size: int
 
 
 # ── Dashboard ──
@@ -224,14 +242,43 @@ async def delete_permission(perm_id: int, db: AsyncSession = Depends(get_db)):
     return {"ok": True}
 
 
+# ── Blob Uploads ──
+
+
+@router.post("/blobs/check", response_model=BlobCheckResponse)
+async def check_blobs(body: BlobCheckRequest):
+    """秒传预检：返回哪些 SHA256 已存在"""
+    async with async_session() as db:
+        result = await db.execute(
+            select(Fingerprint.sha256).where(Fingerprint.sha256.in_(body.sha256_list))
+        )
+        existing = [row[0] for row in result.all()]
+        return BlobCheckResponse(
+            existing=existing,
+            missing=[h for h in body.sha256_list if h not in existing],
+        )
+
+
+@router.post("/blobs/upload", response_model=BlobUploadResponse)
+async def upload_blob(
+    file: UploadFile = File(...),
+    user: User = Depends(get_current_user),
+):
+    """上传单个文件 blob"""
+    data = await file.read()
+    async with async_session() as db:
+        fp = await ensure_fingerprint(db, data)
+        await db.commit()
+        return BlobUploadResponse(
+            fingerprint_id=fp.id, sha256=fp.sha256, size=fp.size
+        )
+
+
 # ── Download Versions ──
 
 @router.get("/versions", response_model=list[VersionItem],
             dependencies=[Depends(require_perm("version:list"))])
 async def list_versions(db: AsyncSession = Depends(get_db)):
-    from app.models.version_file import VersionFile
-    from sqlalchemy import func
-
     result = await db.execute(
         select(
             DownloadVersion,
@@ -262,13 +309,10 @@ async def list_versions(db: AsyncSession = Depends(get_db)):
 @router.post("/versions", status_code=status.HTTP_201_CREATED,
              dependencies=[Depends(require_perm("version:create"))])
 async def create_version(body: VersionCreate, db: AsyncSession = Depends(get_db)):
-    from app.models.version_file import VersionFile
-    from app.models.fingerprint import Fingerprint
-
     if body.is_latest:
-        old = (await db.execute(select(DownloadVersion).where(DownloadVersion.is_latest == True))).scalars().all()
-        for o in old:
-            o.is_latest = False
+        await db.execute(
+            update(DownloadVersion).where(DownloadVersion.is_latest == True).values(is_latest=False)
+        )
 
     # Create version record (exclude files field which is not a column)
     version_data = body.model_dump(exclude={"files"})
@@ -276,23 +320,20 @@ async def create_version(body: VersionCreate, db: AsyncSession = Depends(get_db)
     db.add(v)
     await db.flush()  # get v.id without committing
 
-    for entry in body.files:
-        # Find or create fingerprint
-        fp_result = await db.execute(
-            select(Fingerprint).where(Fingerprint.sha256 == entry.sha256)
-        )
-        fp = fp_result.scalar_one_or_none()
+    for f_entry in body.files:
+        fp = (await db.execute(
+            select(Fingerprint).where(Fingerprint.sha256 == f_entry.sha256)
+        )).scalar_one_or_none()
         if not fp:
-            fp = Fingerprint(sha256=entry.sha256, size=entry.size)
-            db.add(fp)
-            await db.flush()
-
-        vf = VersionFile(
+            raise HTTPException(
+                400,
+                f"fingerprint not found for {f_entry.path}: {f_entry.sha256}. Upload blob first.",
+            )
+        db.add(VersionFile(
             version_id=v.id,
-            relative_path=entry.path,
+            relative_path=f_entry.path,
             fingerprint_id=fp.id,
-        )
-        db.add(vf)
+        ))
 
     await db.commit()
     await db.refresh(v)
