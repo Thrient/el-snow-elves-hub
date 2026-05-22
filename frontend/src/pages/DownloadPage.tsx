@@ -7,7 +7,7 @@ const { Title, Paragraph } = Typography;
 
 interface Version {
   id: number; version: string; platform: string; changelog: string | null;
-  file_url: string; file_size: number | null; is_latest: boolean; created_at: string;
+  is_latest: boolean; is_mandatory: boolean; file_count: number; created_at: string;
 }
 
 const DownloadPage: FC = () => {
@@ -40,7 +40,7 @@ const DownloadPage: FC = () => {
                 <div style={{ fontSize: 13, color: "#b8afa6", marginTop: 8, maxWidth: 500 }}>{latest.changelog}</div>
               )}
             </div>
-            <a href={latest.file_url} target="_blank" rel="noreferrer">
+            <a href={`/api/v1/versions/${latest.id}/download`} target="_blank" rel="noreferrer">
               <Button type="primary" size="large" icon={<DownloadOutlined />} style={{ borderRadius: 8 }}>
                 立即下载
               </Button>
@@ -67,7 +67,7 @@ const DownloadPage: FC = () => {
                       {new Date(ver.created_at).toLocaleDateString("zh-CN")}
                     </div>
                   </div>
-                  <a href={ver.file_url} target="_blank" rel="noreferrer">
+                  <a href={`/api/v1/versions/${ver.id}/download`} target="_blank" rel="noreferrer">
                     <Button icon={<DownloadOutlined />} style={{ borderRadius: 8 }}>下载</Button>
                   </a>
                 </div>
