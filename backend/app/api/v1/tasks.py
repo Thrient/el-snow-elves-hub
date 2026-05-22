@@ -7,7 +7,6 @@ from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 from sqlalchemy import select, func, and_, or_, desc
 from sqlalchemy.ext.asyncio import AsyncSession
-import io
 from urllib.parse import quote
 
 from app.core.database import get_db
@@ -15,9 +14,9 @@ from app.core.deps import get_current_user, get_optional_user
 from app.core.response import ok, fail
 from app.models.task import Comment as CommentModel, DownloadRecord, Task, TaskLike, TaskView
 from app.models.user import User
-from app.models.file import File
-from app.utils.minio import download_file
-from app.utils.file_service import upload, file_url as file_url_from_service
+from app.models.fingerprint import Fingerprint
+from app.utils.minio import stream_file
+from app.utils.file_service import store, file_url as file_url_from_service
 
 router = APIRouter(prefix="/tasks", tags=["任务市场"])
 
@@ -199,9 +198,9 @@ async def download_task(task_id: int, db: AsyncSession = Depends(get_db), user: 
 
     if not t.file:
         raise HTTPException(404, "任务文件不存在")
-    data, ct = download_file(t.file.key)
-    encoded = quote(t.file.original_name)
-    return StreamingResponse(io.BytesIO(data), media_type=ct,
+    gen, ct, length = stream_file(t.file.sha256)
+    encoded = quote(t.title or "download")
+    return StreamingResponse(gen, media_type=ct,
         headers={"Content-Disposition": f"attachment; filename*=UTF-8''{encoded}"})
 
 
@@ -298,27 +297,27 @@ async def create_task(
     db: AsyncSession = Depends(get_db),
 ):
     if zip_file_id:
-        zip_file = (await db.execute(select(File).where(File.id == zip_file_id))).scalar_one_or_none()
-        if not zip_file:
+        zip_fp = (await db.execute(select(Fingerprint).where(Fingerprint.id == zip_file_id))).scalar_one_or_none()
+        if not zip_fp:
             raise HTTPException(400, "文件不存在")
     elif file and file.filename:
         if not file.filename.endswith(".zip"):
             raise HTTPException(400, "仅支持 ZIP 文件")
         zip_data = await file.read()
-        zip_file = await upload(db, zip_data, file.filename or "task.zip", file.content_type or "application/zip", user.id)
+        zip_fp = await store(db, zip_data, file.filename or "task.zip", file.content_type or "application/zip")
     else:
         raise HTTPException(400, "请上传 ZIP 文件")
 
-    cover_file = None
+    cover_fp = None
     if cover and cover.filename:
         cover_data = await cover.read()
-        cover_file = await upload(db, cover_data, cover.filename, cover.content_type or "image/png", user.id)
+        cover_fp = await store(db, cover_data, cover.filename, cover.content_type or "image/png")
 
     task = Task(
         title=title, description=description, author_id=user.id,
         category=category, tags=tags, version=version,
-        file_id=zip_file.id, file_size=zip_file.size or 0,
-        cover_id=cover_file.id if cover_file else None, status="approved",
+        fingerprint_id=zip_fp.id, file_size=zip_fp.size or 0,
+        cover_fingerprint_id=cover_fp.id if cover_fp else None, status="approved",
     )
     db.add(task)
     await db.commit()

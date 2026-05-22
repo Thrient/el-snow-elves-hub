@@ -9,7 +9,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.database import async_session, get_db
 from app.core.deps import get_current_user, require_perm
 from app.core.online_tracker import counts
-from app.utils.fingerprint_service import ensure_fingerprint
+from app.utils.file_service import store
 from app.models.user import User
 from app.models.download import DownloadVersion
 from app.models.fingerprint import Fingerprint
@@ -276,7 +276,7 @@ async def upload_blob(
     """上传单个文件 blob"""
     data = await file.read()
     async with async_session() as db:
-        fp = await ensure_fingerprint(db, data)
+        fp = await store(db, data)
         await db.commit()
         return BlobUploadResponse(
             fingerprint_id=fp.id, sha256=fp.sha256, size=fp.size

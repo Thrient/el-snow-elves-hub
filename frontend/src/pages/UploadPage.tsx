@@ -7,7 +7,7 @@ import {
   InfoCircleOutlined,
 } from "@ant-design/icons";
 import { taskApi } from "../api/tasks";
-import { uploadApi, computeMD5 } from "../api/uploads";
+import { uploadApi, computeSHA256 } from "../api/uploads";
 
 const { Title, Text } = Typography;
 const CHUNK_SIZE = 5 * 1024 * 1024;
@@ -40,7 +40,7 @@ const UploadPage: FC = () => {
   const [progress, setProgress] = useState(0);
   const [uploadedBytes, setUploadedBytes] = useState(0);
   const [speed, setSpeed] = useState(0);
-  const [fileId, setFileId] = useState<number | null>(null);
+  const [fingerprintId, setFingerprintId] = useState<number | null>(null);
   const [dragOver, setDragOver] = useState(false);
   const [form, setForm] = useState({ title: "", description: "", tags: "", version: "1.0" });
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -64,14 +64,14 @@ const UploadPage: FC = () => {
     speedSamples.current = [];
 
     try {
-      const md5 = await computeMD5(f, (pct) => setProgress(pct));
+      const sha256 = await computeSHA256(f, (pct) => setProgress(pct));
 
       setPhase("checking");
-      const check = await uploadApi.check(md5);
+      const check = await uploadApi.check(sha256);
 
-      if (check.exists && check.file_id) {
+      if (check.exists && check.fingerprint_id) {
         setPhase("instant");
-        setFileId(check.file_id);
+        setFingerprintId(check.fingerprint_id);
         setUploadedBytes(f.size);
         setProgress(100);
         await new Promise((r) => setTimeout(r, 800));
@@ -100,7 +100,7 @@ const UploadPage: FC = () => {
       }
 
       const result = await uploadApi.complete(session.upload_id);
-      setFileId(result.file_id);
+      setFingerprintId(result.fingerprint_id);
       setPhase("complete");
       setProgress(100);
     } catch (err: any) {
@@ -122,11 +122,11 @@ const UploadPage: FC = () => {
   };
 
   const resetFile = () => {
-    setFile(null); setFileId(null); setPhase("idle"); setProgress(0);
+    setFile(null); setFingerprintId(null); setPhase("idle"); setProgress(0);
   };
 
   const submit = async () => {
-    if (!fileId) return message.warning("请先上传文件");
+    if (!fingerprintId) return message.warning("请先上传文件");
     if (!form.title.trim()) return message.warning("请输入任务名称");
     setPhase("submitting");
     try {
@@ -136,7 +136,7 @@ const UploadPage: FC = () => {
         category: "综合",
         tags: form.tags.trim(),
         version: form.version.trim() || "1.0",
-        zip_file_id: fileId,
+        zip_file_id: fingerprintId,
         cover: coverFile || undefined,
       });
       message.success("发布成功");
@@ -145,7 +145,7 @@ const UploadPage: FC = () => {
   };
 
   const isUploading = ["hashing", "checking", "uploading"].includes(phase);
-  const step = !file ? 1 : fileId ? 3 : 2;
+  const step = !file ? 1 : fingerprintId ? 3 : 2;
 
   return (
     <div style={{ maxWidth: 660, margin: "0 auto" }}>
@@ -410,14 +410,14 @@ const UploadPage: FC = () => {
         type="primary"
         size="large"
         loading={phase === "submitting"}
-        disabled={!fileId}
+        disabled={!fingerprintId}
         onClick={submit}
         block
         style={{
           height: 50, borderRadius: 14, fontSize: 16, fontWeight: 600,
-          background: fileId ? "linear-gradient(135deg, #d4513b, #c4402a)" : undefined,
-          border: fileId ? "none" : undefined,
-          boxShadow: fileId ? "0 6px 24px rgba(212,81,59,0.35)" : undefined,
+          background: fingerprintId ? "linear-gradient(135deg, #d4513b, #c4402a)" : undefined,
+          border: fingerprintId ? "none" : undefined,
+          boxShadow: fingerprintId ? "0 6px 24px rgba(212,81,59,0.35)" : undefined,
         }}
       >
         {phase === "submitting" ? "发布中..." : "发布任务"}

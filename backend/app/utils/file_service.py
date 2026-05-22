@@ -1,48 +1,38 @@
-"""文件服务 — 上传到 MinIO + 中间表记录 + MD5 去重"""
+"""文件服务 — SHA256 去重 + MinIO 内容寻址存储"""
 import hashlib
-import uuid
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.models.file import File
+from app.models.fingerprint import Fingerprint
 from app.utils.minio import upload_file, get_file_url
 
 
-async def upload(
-    db: AsyncSession,
-    data: bytes,
-    filename: str,
-    content_type: str = "application/octet-stream",
-    uploader_id: int | None = None,
-) -> File:
-    """上传文件到 MinIO，写入中间表。同 MD5 文件不重复上传"""
-    md5 = hashlib.md5(data).hexdigest()
+async def store(db: AsyncSession, data: bytes, filename: str = "file.bin",
+                content_type: str = "application/octet-stream",
+                uploader_id: int | None = None) -> Fingerprint:
+    """SHA256 去重上传。MinIO key = SHA256 十六进制串。"""
+    sha256 = hashlib.sha256(data).hexdigest()
 
-    # 去重：相同 MD5 直接复用
-    existing = (await db.execute(select(File).where(File.md5 == md5))).scalar_one_or_none()
+    existing = (await db.execute(
+        select(Fingerprint).where(Fingerprint.sha256 == sha256)
+    )).scalar_one_or_none()
     if existing:
         return existing
 
-    ext = filename.split(".")[-1] if "." in filename else "bin"
-    key = f"files/{uuid.uuid4().hex}.{ext}"
-    upload_file(key, data, content_type)
-
-    f = File(
-        key=key,
-        original_name=filename,
-        content_type=content_type,
-        size=len(data),
-        md5=md5,
-        uploader_id=uploader_id,
-    )
-    db.add(f)
+    upload_file(sha256, data, content_type)
+    fp = Fingerprint(sha256=sha256, size=len(data))
+    db.add(fp)
     await db.flush()
-    return f
+    return fp
 
 
-def file_url(file: File | None) -> str | None:
-    """从 File 记录获取预签名 URL"""
-    if not file:
+def file_url(fp: Fingerprint | None) -> str | None:
+    """从 Fingerprint 记录获取预签名 URL。MinIO key = sha256。"""
+    if not fp:
         return None
-    return get_file_url(file.key)
+    return get_file_url(fp.sha256)
+
+
+# backward-compat alias
+upload = store

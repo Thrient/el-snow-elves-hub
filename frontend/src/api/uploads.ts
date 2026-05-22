@@ -18,13 +18,13 @@ export interface UploadSession {
 
 export interface FileCheckResult {
   exists: boolean;
-  file_id: number | null;
+  fingerprint_id: number | null;
 }
 
 export const uploadApi = {
-  /** Check if file already exists (instant upload) */
-  check: async (md5: string): Promise<FileCheckResult> => {
-    const { data } = await API.post<{ code: number; data: FileCheckResult }>("/files/check", { md5 });
+  /** Check if file already exists (instant upload via SHA256) */
+  check: async (sha256: string): Promise<FileCheckResult> => {
+    const { data } = await API.post<{ code: number; data: FileCheckResult }>("/files/check", { sha256 });
     return data.data;
   },
 
@@ -46,44 +46,54 @@ export const uploadApi = {
   },
 
   /** Complete the upload, assemble chunks */
-  complete: async (uploadId: string): Promise<{ file_id: number }> => {
-    const { data } = await API.post<{ code: number; data: { file_id: number } }>(`/uploads/${uploadId}/complete`);
+  complete: async (uploadId: string): Promise<{ fingerprint_id: number }> => {
+    const { data } = await API.post<{ code: number; data: { fingerprint_id: number } }>(`/uploads/${uploadId}/complete`);
     return data.data;
   },
 };
 
-/** Compute MD5 of a File incrementally, with progress callback */
-export function computeMD5(file: File, onProgress?: (pct: number) => void): Promise<string> {
+/** Compute SHA256 of a File incrementally, with progress callback */
+export function computeSHA256(file: File, onProgress?: (pct: number) => void): Promise<string> {
   return new Promise((resolve, reject) => {
-    // Dynamic import of spark-md5
-    import("spark-md5").then(({ default: SparkMD5 }) => {
-      const spark = new SparkMD5.ArrayBuffer();
-      const chunkSize = CHUNK_SIZE;
-      const totalChunks = Math.ceil(file.size / chunkSize);
-      let currentChunk = 0;
-      const reader = new FileReader();
+    const chunkSize = CHUNK_SIZE;
+    const totalChunks = Math.ceil(file.size / chunkSize);
+    const chunks: ArrayBuffer[] = [];
+    let currentChunk = 0;
+    const reader = new FileReader();
 
-      reader.onload = (e) => {
-        if (!e.target?.result) return reject(new Error("Read failed"));
-        spark.append(e.target.result as ArrayBuffer);
-        currentChunk++;
-        onProgress?.(Math.round((currentChunk / totalChunks) * 100));
-        if (currentChunk < totalChunks) {
-          readNext();
-        } else {
-          resolve(spark.end());
+    reader.onload = (e) => {
+      if (!e.target?.result) return reject(new Error("Read failed"));
+      chunks.push(e.target.result as ArrayBuffer);
+      currentChunk++;
+      onProgress?.(Math.round((currentChunk / totalChunks) * 100));
+      if (currentChunk < totalChunks) {
+        readNext();
+      } else {
+        // Concatenate all chunks and hash
+        const totalLength = chunks.reduce((acc, c) => acc + c.byteLength, 0);
+        const merged = new Uint8Array(totalLength);
+        let offset = 0;
+        for (const c of chunks) {
+          merged.set(new Uint8Array(c), offset);
+          offset += c.byteLength;
         }
-      };
+        crypto.subtle.digest("SHA-256", merged).then((hash) => {
+          const hex = Array.from(new Uint8Array(hash))
+            .map((b) => b.toString(16).padStart(2, "0"))
+            .join("");
+          resolve(hex);
+        }).catch(reject);
+      }
+    };
 
-      reader.onerror = () => reject(new Error("Read error"));
+    reader.onerror = () => reject(new Error("Read error"));
 
-      const readNext = () => {
-        const start = currentChunk * chunkSize;
-        const end = Math.min(start + chunkSize, file.size);
-        reader.readAsArrayBuffer(file.slice(start, end));
-      };
+    const readNext = () => {
+      const start = currentChunk * chunkSize;
+      const end = Math.min(start + chunkSize, file.size);
+      reader.readAsArrayBuffer(file.slice(start, end));
+    };
 
-      readNext();
-    }).catch(reject);
+    readNext();
   });
 }

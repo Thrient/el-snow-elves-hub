@@ -21,7 +21,6 @@ class Upload(Base):
     total_size: Mapped[int] = mapped_column(Integer, nullable=False)
     total_chunks: Mapped[int] = mapped_column(Integer, nullable=False)
     uploaded_chunks: Mapped[list | None] = mapped_column(JSON, default=list)  # [0, 1, 2, ...]
-    md5: Mapped[str | None] = mapped_column(String(32), nullable=True)
     status: Mapped[str] = mapped_column(String(16), default="uploading")  # uploading | done | expired
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc) + timedelta(hours=24))

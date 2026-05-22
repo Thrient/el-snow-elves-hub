@@ -12,7 +12,7 @@ from app.core.database import get_db
 from app.core.deps import get_current_user, get_optional_user
 from app.core.response import ok
 from app.models.forum import ForumBoard, ForumPost
-from app.models.file import File
+from app.models.fingerprint import Fingerprint
 from app.models.user import User
 from app.api.v1.notifications import send_notification
 from app.models.rbac import Permission
@@ -138,9 +138,9 @@ def _author(u: User | None) -> PostAuthor | None:
 async def _resolve_images(db: AsyncSession, image_ids: list | None) -> list[str]:
     if not image_ids:
         return []
-    result = await db.execute(select(File).where(File.id.in_(image_ids)))
-    files = {f.id: f for f in result.scalars().all()}
-    return [file_url(files[fid]) for fid in image_ids if fid in files]
+    result = await db.execute(select(Fingerprint).where(Fingerprint.id.in_(image_ids)))
+    fps = {fp.id: fp for fp in result.scalars().all()}
+    return [file_url(fps[fid]) for fid in image_ids if fid in fps]
 
 
 async def _thread_out(t: ForumPost, board_name: str, db: AsyncSession) -> ThreadOut:

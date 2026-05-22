@@ -97,10 +97,10 @@ export const forumApi = {
     API.get<{ code: number; data: PageResult<ThreadItem> & { query: string } }>("/forum/search", { params: { q, page } })
       .then((r) => r.data.data),
 
-  uploadImage: async (file: File): Promise<{ file_id: number; url: string }> => {
+  uploadImage: async (file: File): Promise<{ fingerprint_id: number; url: string }> => {
     const fd = new FormData();
     fd.append("file", file);
-    const { data } = await API.post<{ code: number; data: { file_id: number; url: string } }>("/files/upload", fd, {
+    const { data } = await API.post<{ code: number; data: { fingerprint_id: number; url: string } }>("/files/upload", fd, {
       headers: { "Content-Type": "multipart/form-data" },
     });
     return data.data;

@@ -15,14 +15,14 @@ class User(Base):
     username: Mapped[str] = mapped_column(String(64), unique=True, nullable=False, index=True)
     email: Mapped[str] = mapped_column(String(255), unique=True, nullable=False, index=True)
     password_hash: Mapped[str] = mapped_column(String(255), nullable=False)
-    avatar_id: Mapped[int | None] = mapped_column(ForeignKey("files.id"), nullable=True)
+    avatar_id: Mapped[int | None] = mapped_column(ForeignKey("fingerprints.id"), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
 
     roles: Mapped[list[Role]] = relationship(
         secondary="user_roles", lazy="selectin"
     )
-    avatar: Mapped["File | None"] = relationship("File", foreign_keys=[avatar_id], lazy="selectin")
+    avatar: Mapped["Fingerprint | None"] = relationship("Fingerprint", foreign_keys=[avatar_id], lazy="selectin")
 
     def has_permission(self, code: str) -> bool:
         perms: set[str] = set()

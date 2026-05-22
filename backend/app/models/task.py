@@ -17,9 +17,9 @@ class Task(Base):
     category: Mapped[str] = mapped_column(String(32), default="综合")
     tags: Mapped[str | None] = mapped_column(String(500), nullable=True)  # "采集,日常,江南"
     version: Mapped[str] = mapped_column(String(32), default="1.0")
-    file_id: Mapped[int | None] = mapped_column(ForeignKey("files.id"), nullable=True, comment="任务ZIP文件ID")
+    fingerprint_id: Mapped[int | None] = mapped_column(ForeignKey("fingerprints.id"), nullable=True, comment="任务ZIP文件指纹ID")
     file_size: Mapped[int | None] = mapped_column(Integer, nullable=True)
-    cover_id: Mapped[int | None] = mapped_column(ForeignKey("files.id"), nullable=True, comment="封面图文件ID")
+    cover_fingerprint_id: Mapped[int | None] = mapped_column(ForeignKey("fingerprints.id"), nullable=True, comment="封面图指纹ID")
     status: Mapped[str] = mapped_column(String(16), default="approved")  # pending | approved | rejected
     view_count: Mapped[int] = mapped_column(Integer, default=0)
     download_count: Mapped[int] = mapped_column(Integer, default=0)
@@ -28,8 +28,8 @@ class Task(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
 
-    file: Mapped["File | None"] = relationship("File", foreign_keys=[file_id], lazy="selectin")
-    cover: Mapped["File | None"] = relationship("File", foreign_keys=[cover_id], lazy="selectin")
+    file: Mapped["Fingerprint | None"] = relationship("Fingerprint", foreign_keys=[fingerprint_id], lazy="selectin")
+    cover: Mapped["Fingerprint | None"] = relationship("Fingerprint", foreign_keys=[cover_fingerprint_id], lazy="selectin")
 
 
 class Comment(Base):

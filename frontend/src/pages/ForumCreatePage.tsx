@@ -53,7 +53,7 @@ const ForumCreatePage: FC = () => {
       try {
         const result = await forumApi.uploadImage(arr[i]);
         setImages((prev) => prev.map((img) => {
-          if (img.file === arr[i]) return { ...img, uploading: false, fileId: result.file_id };
+          if (img.file === arr[i]) return { ...img, uploading: false, fileId: result.fingerprint_id };
           return img;
         }));
       } catch {

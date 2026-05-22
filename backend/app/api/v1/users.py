@@ -10,7 +10,7 @@ from app.core.database import get_db
 from app.core.deps import get_current_user
 from app.models.task import DownloadRecord, Task, TaskLike
 from app.models.user import User
-from app.utils.file_service import upload, file_url
+from app.utils.file_service import store, file_url
 
 router = APIRouter(prefix="/users", tags=["用户"])
 
@@ -60,7 +60,7 @@ async def upload_avatar(file: UploadFile = File(...), user: User = Depends(get_c
     if not file.content_type or not file.content_type.startswith("image/"):
         return {"code": -1, "message": "仅支持图片格式"}
     data = await file.read()
-    f = await upload(db, data, file.filename or "avatar.png", file.content_type, user.id)
-    user.avatar_id = f.id
+    fp = await store(db, data, file.filename or "avatar.png", file.content_type)
+    user.avatar_id = fp.id
     await db.commit()
-    return {"code": 0, "message": "ok", "data": {"avatar_url": file_url(f)}}
+    return {"code": 0, "message": "ok", "data": {"avatar_url": file_url(fp)}}

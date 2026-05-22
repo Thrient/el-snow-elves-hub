@@ -58,7 +58,7 @@ const ForumThreadPage: FC = () => {
     try {
       const ids = await Promise.all(files.map(async (f) => {
         const res = await forumApi.uploadImage(f);
-        return res.file_id;
+        return res.fingerprint_id;
       }));
       return ids;
     } catch {

@@ -10,7 +10,7 @@ from app.core.deps import get_current_user
 from app.models.upload import Upload
 from app.models.user import User
 from app.utils.minio import upload_file as minio_upload, download_file as minio_download
-from app.utils.file_service import upload as file_upload, file_url
+from app.utils.file_service import store, file_url
 
 router = APIRouter(prefix="/uploads", tags=["断点续传"])
 
@@ -19,12 +19,11 @@ class InitRequest(BaseModel):
     filename: str
     total_size: int
     total_chunks: int
-    md5: str | None = None
 
 
 @router.post("/init")
 async def init_upload(body: InitRequest, user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db)):
-    upload = Upload(filename=body.filename, total_size=body.total_size, total_chunks=body.total_chunks, md5=body.md5)
+    upload = Upload(filename=body.filename, total_size=body.total_size, total_chunks=body.total_chunks)
     db.add(upload)
     await db.commit()
     return {"code": 0, "data": {"upload_id": upload.upload_id, "expires_at": upload.expires_at.isoformat()}}
@@ -68,8 +67,8 @@ async def complete_upload(upload_id: str, user: User = Depends(get_current_user)
 
     full_data = buf.getvalue()
 
-    # 计算 MD5 并去重
-    f = await file_upload(db, full_data, upload.filename, "application/octet-stream", user.id)
+    # 计算 SHA256 并去重上传
+    fp = await store(db, full_data, upload.filename, "application/octet-stream")
 
     # 清理分片
     for n in chunks:
@@ -82,4 +81,4 @@ async def complete_upload(upload_id: str, user: User = Depends(get_current_user)
     upload.status = "done"
     await db.commit()
 
-    return {"code": 0, "data": {"file_id": f.id, "url": file_url(f)}}
+    return {"code": 0, "data": {"fingerprint_id": fp.id, "url": file_url(fp)}}
