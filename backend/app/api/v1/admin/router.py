@@ -8,6 +8,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import async_session, get_db
 from app.core.deps import get_current_user, require_perm
+from app.core.online_tracker import counts
 from app.utils.fingerprint_service import ensure_fingerprint
 from app.models.user import User
 from app.models.download import DownloadVersion
@@ -28,6 +29,8 @@ router = APIRouter(
 class StatsResponse(BaseModel):
     user_count: int
     version_count: int
+    desktop_online: int
+    web_online: int
 
 
 class UserItem(BaseModel):
@@ -89,9 +92,15 @@ class BlobUploadResponse(BaseModel):
 
 @router.get("/stats", response_model=StatsResponse)
 async def get_stats(db: AsyncSession = Depends(get_db)):
-    user_count = (await db.execute(select(func.count(User.id)))).scalar()
-    version_count = (await db.execute(select(func.count(DownloadVersion.id)))).scalar()
-    return StatsResponse(user_count=user_count or 0, version_count=version_count or 0)
+    user_count = (await db.execute(select(func.count(User.id)))).scalar() or 0
+    version_count = (await db.execute(select(func.count(DownloadVersion.id)))).scalar() or 0
+    online = counts()
+    return StatsResponse(
+        user_count=user_count,
+        version_count=version_count,
+        desktop_online=online.get("desktop", 0),
+        web_online=online.get("web", 0),
+    )
 
 
 # ── Users ──

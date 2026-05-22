@@ -38,6 +38,8 @@ API.interceptors.response.use(
 export interface AdminStats {
   user_count: number;
   version_count: number;
+  desktop_online: number;
+  web_online: number;
 }
 
 export interface AdminUser {
