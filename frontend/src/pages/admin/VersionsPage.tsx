@@ -48,6 +48,7 @@ const VersionsPage: FC = () => {
     setFileManifest({});
     setUploadStage("idle");
     setUploadProgress({ done: 0, total: 0 });
+    if (folderInputRef.current) folderInputRef.current.value = "";
   };
 
   const handleFolderSelect = async (e: React.ChangeEvent<HTMLInputElement>) => {
