@@ -39,24 +39,30 @@ class UserItem(BaseModel):
     model_config = {"from_attributes": True}
 
 
+class FileEntry(BaseModel):
+    path: str
+    sha256: str
+    size: int
+
+
 class VersionCreate(BaseModel):
     version: str
     platform: str = "Windows x64"
     changelog: str | None = None
-    file_url: str
-    file_size: int | None = None
     is_latest: bool = False
+    is_mandatory: bool = False
+    files: list[FileEntry]
 
 
 class VersionItem(BaseModel):
     id: int
     version: str
     platform: str
-    changelog: str | None
-    file_url: str
-    file_size: int | None
+    changelog: str | None = None
     is_latest: bool
+    is_mandatory: bool
     created_at: datetime
+    file_count: int | None = None  # populated by query join
 
     model_config = {"from_attributes": True}
 
@@ -223,19 +229,71 @@ async def delete_permission(perm_id: int, db: AsyncSession = Depends(get_db)):
 @router.get("/versions", response_model=list[VersionItem],
             dependencies=[Depends(require_perm("version:list"))])
 async def list_versions(db: AsyncSession = Depends(get_db)):
-    result = await db.execute(select(DownloadVersion).order_by(DownloadVersion.created_at.desc()))
-    return [VersionItem.model_validate(v) for v in result.scalars().all()]
+    from app.models.version_file import VersionFile
+    from sqlalchemy import func
+
+    result = await db.execute(
+        select(
+            DownloadVersion,
+            func.count(VersionFile.id).label("file_count"),
+        )
+        .outerjoin(VersionFile, VersionFile.version_id == DownloadVersion.id)
+        .group_by(DownloadVersion.id)
+        .order_by(DownloadVersion.created_at.desc())
+    )
+    rows = result.all()
+    items = []
+    for row in rows:
+        v = row[0]
+        fc = row[1]
+        items.append(VersionItem(
+            id=v.id,
+            version=v.version,
+            platform=v.platform,
+            changelog=v.changelog,
+            is_latest=v.is_latest,
+            is_mandatory=v.is_mandatory,
+            created_at=v.created_at,
+            file_count=fc,
+        ))
+    return items
 
 
 @router.post("/versions", status_code=status.HTTP_201_CREATED,
              dependencies=[Depends(require_perm("version:create"))])
 async def create_version(body: VersionCreate, db: AsyncSession = Depends(get_db)):
+    from app.models.version_file import VersionFile
+    from app.models.fingerprint import Fingerprint
+
     if body.is_latest:
         old = (await db.execute(select(DownloadVersion).where(DownloadVersion.is_latest == True))).scalars().all()
         for o in old:
             o.is_latest = False
-    v = DownloadVersion(**body.model_dump())
+
+    # Create version record (exclude files field which is not a column)
+    version_data = body.model_dump(exclude={"files"})
+    v = DownloadVersion(**version_data)
     db.add(v)
+    await db.flush()  # get v.id without committing
+
+    for entry in body.files:
+        # Find or create fingerprint
+        fp_result = await db.execute(
+            select(Fingerprint).where(Fingerprint.sha256 == entry.sha256)
+        )
+        fp = fp_result.scalar_one_or_none()
+        if not fp:
+            fp = Fingerprint(sha256=entry.sha256, size=entry.size)
+            db.add(fp)
+            await db.flush()
+
+        vf = VersionFile(
+            version_id=v.id,
+            relative_path=entry.path,
+            fingerprint_id=fp.id,
+        )
+        db.add(vf)
+
     await db.commit()
     await db.refresh(v)
     return {"ok": True, "id": v.id}

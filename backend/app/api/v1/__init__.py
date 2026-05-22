@@ -50,9 +50,8 @@ async def list_public_versions(db=Depends(get_db)):
                 "version": v.version,
                 "platform": v.platform,
                 "changelog": v.changelog,
-                "file_url": v.file_url,
-                "file_size": v.file_size,
                 "is_latest": v.is_latest,
+                "is_mandatory": v.is_mandatory,
                 "created_at": v.created_at.isoformat(),
             }
             for v in versions

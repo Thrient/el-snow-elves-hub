@@ -143,7 +143,7 @@ async def seed():
         ver = (await db.execute(select(DownloadVersion).limit(1))).scalar_one_or_none()
         if not ver:
             db.add(DownloadVersion(version="7.0.0", platform="Windows x64", changelog="首个正式版本",
-                                    file_url="/api/v1/files/7/download", is_latest=True))
+                                    is_latest=True))
             print("已创建示例版本 v7.0.0")
 
         # ── Forum boards ──
