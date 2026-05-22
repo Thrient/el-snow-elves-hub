@@ -1,6 +1,11 @@
 """API v1 路由聚合"""
+import io
+import zipfile
 from typing import Optional
-from fastapi import APIRouter, Depends, Request
+from urllib.parse import quote
+
+from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 from sqlalchemy import select
 
@@ -23,6 +28,7 @@ from app.models.version_file import VersionFile
 from app.models.route import Route
 from app.models.user import User
 from app.schemas.route import RoutePublic
+from app.utils.minio import stream_file
 
 router = APIRouter()
 
@@ -138,6 +144,51 @@ async def diff_versions(body: DiffRequest):
             is_mandatory=latest.is_mandatory,
             changed=changed,
             removed=removed,
+        )
+
+
+@router.get("/versions/{version_id}/download")
+async def download_version_zip(version_id: int):
+    """下载版本为 zip 压缩包（流式，不落盘）。"""
+    async with async_session() as db:
+        # Look up version
+        v = (await db.execute(
+            select(DownloadVersion).where(DownloadVersion.id == version_id)
+        )).scalar_one_or_none()
+        if not v:
+            raise HTTPException(404, "版本不存在")
+
+        # Get all files
+        rows = (await db.execute(
+            select(VersionFile, Fingerprint)
+            .join(Fingerprint, VersionFile.fingerprint_id == Fingerprint.id)
+            .where(VersionFile.version_id == version_id)
+        )).all()
+
+        if not rows:
+            raise HTTPException(404, "版本无文件")
+
+        def generate_zip():
+            buffer = io.BytesIO()
+            with zipfile.ZipFile(buffer, 'w', zipfile.ZIP_DEFLATED) as zf:
+                for vf, fp in rows:
+                    gen, ct, length = stream_file(fp.sha256)
+                    content = b''.join(gen)
+                    zf.writestr(vf.relative_path, content)
+            buffer.seek(0)
+            while True:
+                chunk = buffer.read(8192)
+                if not chunk:
+                    break
+                yield chunk
+
+        filename = quote(f"{v.version}.zip")
+        return StreamingResponse(
+            generate_zip(),
+            media_type="application/zip",
+            headers={
+                "Content-Disposition": f'attachment; filename="{filename}"; filename*=UTF-8\'\'{filename}',
+            },
         )
 
 
