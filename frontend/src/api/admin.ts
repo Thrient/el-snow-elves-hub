@@ -70,9 +70,9 @@ export interface AdminVersion {
   version: string;
   platform: string;
   changelog: string | null;
-  file_url: string;
-  file_size: number | null;
   is_latest: boolean;
+  is_mandatory: boolean;
+  file_count: number | null;
   created_at: string;
 }
 
@@ -131,14 +131,28 @@ export const adminApi = {
 
   // Versions
   listVersions: () => API.get<AdminVersion[]>("/admin/versions").then((r) => r.data),
-  createVersion: (data: Omit<AdminVersion, "id" | "created_at">) =>
-    API.post("/admin/versions", data).then((r) => r.data),
-  uploadVersionFile: (file: File) => {
+  createVersion: (data: {
+    version: string;
+    platform?: string;
+    changelog?: string;
+    is_latest?: boolean;
+    is_mandatory?: boolean;
+    files: { path: string; sha256: string; size: number }[];
+  }) => API.post("/admin/versions", data).then((r) => r.data),
+  deleteVersion: (id: number) => API.delete(`/admin/versions/${id}`),
+
+  // Blob check (instant-upload pre-check)
+  checkBlobs: (sha256_list: string[]): Promise<{ existing: string[]; missing: string[] }> => {
+    return API.post("/admin/blobs/check", { sha256_list }).then((r) => r.data);
+  },
+
+  // Blob upload (single file)
+  uploadBlob: async (file: File): Promise<{ fingerprint_id: number; sha256: string; size: number }> => {
     const form = new FormData();
     form.append("file", file);
-    return API.post("/files/upload", form).then((r) => r.data.data);
+    const res = await API.post("/admin/blobs/upload", form);
+    return res.data;
   },
-  deleteVersion: (id: number) => API.delete(`/admin/versions/${id}`),
 
   // Tasks
   listTasks: () => API.get<AdminTask[]>("/admin/tasks").then((r) => r.data),
