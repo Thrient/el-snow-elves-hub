@@ -356,6 +356,7 @@ async def delete_version(version_id: int, db: AsyncSession = Depends(get_db)):
     v = result.scalar_one_or_none()
     if not v:
         raise HTTPException(status_code=404, detail="版本不存在")
+    await db.execute(delete(VersionFile).where(VersionFile.version_id == version_id))
     await db.delete(v)
     await db.commit()
     return {"ok": True}
