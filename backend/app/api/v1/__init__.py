@@ -110,7 +110,9 @@ async def diff_versions(body: DiffRequest):
         if not latest:
             return DiffResponse(latest_version=body.current_version)
 
-        if latest.version == body.current_version:
+        cur = body.current_version.lstrip("v")
+        lat = latest.version.lstrip("v")
+        if lat == cur:
             return DiffResponse(latest_version=body.current_version)
 
         # Get all files for latest version
