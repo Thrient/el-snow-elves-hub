@@ -100,14 +100,26 @@ async def _sse_event_generator(user_id: int):
 async def notification_stream(token: str = Query(...), db: AsyncSession = Depends(get_db)):
     """SSE 实时推送通知，nginx 需 proxy_buffering off"""
     from app.core.security import decode_access_token
+    from app.core.online_tracker import connect as online_connect, disconnect as online_disconnect
+
     payload = decode_access_token(token)
     if not payload:
         raise HTTPException(401, "token 无效")
     user_id = int(payload.get("sub", 0))
     if not user_id:
         raise HTTPException(401, "token 数据缺失")
+
+    web_client_id, _ = await online_connect("web")
+
+    async def tracked_generator():
+        try:
+            async for chunk in _sse_event_generator(user_id):
+                yield chunk
+        finally:
+            await online_disconnect("web", web_client_id)
+
     return StreamingResponse(
-        _sse_event_generator(user_id),
+        tracked_generator(),
         media_type="text/event-stream",
         headers={"Cache-Control": "no-cache", "Connection": "keep-alive", "X-Accel-Buffering": "no"},
     )
