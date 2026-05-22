@@ -10,6 +10,7 @@ from app.api.v1.users import router as users_router
 from app.api.v1.files import router as files_router
 from app.api.v1.uploads import router as uploads_router
 from app.api.v1.forum import router as forum_router
+from app.api.v1.blobs import router as blobs_router
 from app.api.v1.notifications import router as notifications_router
 from app.core.database import get_db
 from app.core.deps import get_optional_user
@@ -27,6 +28,7 @@ router.include_router(users_router)
 router.include_router(files_router)
 router.include_router(uploads_router)
 router.include_router(forum_router)
+router.include_router(blobs_router)
 router.include_router(notifications_router)
 
 
