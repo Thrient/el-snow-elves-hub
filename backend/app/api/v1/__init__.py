@@ -182,7 +182,7 @@ async def download_version_zip(version_id: int):
                     break
                 yield chunk
 
-        filename = quote(f"{v.version}.zip")
+        filename = quote(f"Elves-{v.version}.zip")
         return StreamingResponse(
             generate_zip(),
             media_type="application/zip",
