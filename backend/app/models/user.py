@@ -35,7 +35,7 @@ class User(Base):
 
     @property
     def avatar_url(self) -> str | None:
-        from app.utils.file_service import file_url
+        from app.utils.fingerprint_service import file_url
         return file_url(self.avatar) if self.avatar else None
 
     @property

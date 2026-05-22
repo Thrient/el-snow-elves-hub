@@ -16,7 +16,7 @@ from app.models.fingerprint import Fingerprint
 from app.models.user import User
 from app.api.v1.notifications import send_notification
 from app.models.rbac import Permission
-from app.utils.file_service import file_url
+from app.utils.fingerprint_service import file_url
 
 router = APIRouter(prefix="/forum", tags=["论坛"])
 

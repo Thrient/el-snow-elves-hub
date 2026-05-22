@@ -9,7 +9,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.database import async_session, get_db
 from app.core.deps import get_current_user, require_perm
 from app.core.online_tracker import counts
-from app.utils.file_service import store
+from app.utils.fingerprint_service import store
 from app.models.user import User
 from app.models.download import DownloadVersion
 from app.models.fingerprint import Fingerprint

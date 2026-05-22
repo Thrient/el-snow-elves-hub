@@ -2,6 +2,7 @@
 
 from contextlib import asynccontextmanager
 
+from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 
@@ -9,11 +10,25 @@ from app.config import settings
 from app.core.response import http_exception_handler
 
 
+async def _daily_cleanup():
+    try:
+        from app.core.database import async_session
+        from app.api.v1.uploads import _cleanup_expired
+        async with async_session() as db:
+            count = await _cleanup_expired(db)
+            if count:
+                print(f"[定时清理] 清理了 {count} 个过期上传")
+    except Exception as e:
+        print(f"[定时清理] 失败: {e}")
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    # Startup
+    scheduler = AsyncIOScheduler()
+    scheduler.add_job(_daily_cleanup, "cron", hour=0, minute=0)
+    scheduler.start()
     yield
-    # Shutdown
+    scheduler.shutdown()
 
 
 app = FastAPI(
@@ -29,8 +44,9 @@ app.add_middleware(
         "http://localhost:5173",
         "http://localhost:3000",
         "http://192.168.3.21:5173",
-        "http://nas.elarion.cn:5173",
-        "http://nas.elarion.cn",
+        "https://192.168.3.21:5173",
+        "https://nas.elarion.cn:5173",
+        "https://hub.elarion.cn:5173",
     ],
     allow_credentials=True,
     allow_methods=["*"],

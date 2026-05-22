@@ -24,6 +24,7 @@ async def seed():
             "ALTER TABLE forum_posts ADD COLUMN like_count INT DEFAULT 0",
             "ALTER TABLE routes ADD COLUMN in_menu BOOL DEFAULT TRUE",
             "ALTER TABLE roles ADD COLUMN data_scope VARCHAR(16) DEFAULT 'all'",
+            "DROP TABLE IF EXISTS files",
         ]:
             try:
                 await conn.run_sync(lambda c, s=sql: c.exec_driver_sql(s))

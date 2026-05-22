@@ -16,7 +16,7 @@ from app.models.task import Comment as CommentModel, DownloadRecord, Task, TaskL
 from app.models.user import User
 from app.models.fingerprint import Fingerprint
 from app.utils.minio import stream_file
-from app.utils.file_service import store, file_url as file_url_from_service
+from app.utils.fingerprint_service import store, file_url as file_url_from_service
 
 router = APIRouter(prefix="/tasks", tags=["任务市场"])
 

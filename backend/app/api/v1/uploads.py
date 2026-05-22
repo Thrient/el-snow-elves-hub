@@ -9,10 +9,46 @@ from app.core.database import get_db
 from app.core.deps import get_current_user
 from app.models.upload import Upload
 from app.models.user import User
-from app.utils.minio import upload_file as minio_upload, download_file as minio_download
-from app.utils.file_service import store, file_url
+from app.utils.minio import upload_file as minio_upload, download_file as minio_download, get_s3
+from datetime import datetime, timezone
+
+from app.utils.fingerprint_service import store, file_url
 
 router = APIRouter(prefix="/uploads", tags=["断点续传"])
+
+
+async def _cleanup_expired(db: AsyncSession):
+    """删除过期的上传会话及 MinIO 分片"""
+    result = await db.execute(
+        select(Upload).where(
+            and_(
+                Upload.status.in_(["uploading", "done"]),
+                Upload.expires_at < datetime.now(timezone.utc)
+            )
+        )
+    )
+    expired = result.scalars().all()
+    for u in expired:
+        try:
+            s3 = get_s3()
+            for n in range(u.total_chunks):
+                try:
+                    s3.delete_object(Bucket="el-snow-hub", Key=f"chunks/{u.upload_id}/{n}")
+                except Exception:
+                    pass
+        except Exception:
+            pass
+        await db.delete(u)
+    if expired:
+        await db.commit()
+    return len(expired)
+
+
+@router.post("/cleanup")
+async def cleanup_expired_uploads(db: AsyncSession = Depends(get_db)):
+    """清理过期上传会话（24小时未完成），可在 init 时顺便调用"""
+    count = await _cleanup_expired(db)
+    return {"code": 0, "message": f"清理了 {count} 个过期上传"}
 
 
 class InitRequest(BaseModel):
@@ -78,7 +114,7 @@ async def complete_upload(upload_id: str, user: User = Depends(get_current_user)
         except Exception:
             pass
 
-    upload.status = "done"
+    await db.delete(upload)
     await db.commit()
 
     return {"code": 0, "data": {"fingerprint_id": fp.id, "url": file_url(fp)}}

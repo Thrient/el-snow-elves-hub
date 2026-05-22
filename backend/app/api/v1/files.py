@@ -10,7 +10,7 @@ from app.core.deps import get_current_user, get_optional_user
 from app.models.fingerprint import Fingerprint
 from app.models.user import User
 from app.models.rbac import Role as RoleModel
-from app.utils.file_service import store, file_url
+from app.utils.fingerprint_service import store, file_url
 from app.utils.minio import stream_file
 
 router = APIRouter(prefix="/files", tags=["文件"])

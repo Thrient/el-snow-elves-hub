@@ -10,7 +10,7 @@ from app.core.database import get_db
 from app.core.deps import get_current_user
 from app.models.task import DownloadRecord, Task, TaskLike
 from app.models.user import User
-from app.utils.file_service import store, file_url
+from app.utils.fingerprint_service import store, file_url
 
 router = APIRouter(prefix="/users", tags=["用户"])
 
