@@ -1,6 +1,7 @@
 """API v1 路由聚合"""
 from typing import Optional
 from fastapi import APIRouter, Depends, Request
+from pydantic import BaseModel
 from sqlalchemy import select
 
 from app.api.v1.auth import router as auth_router
@@ -12,9 +13,11 @@ from app.api.v1.uploads import router as uploads_router
 from app.api.v1.forum import router as forum_router
 from app.api.v1.blobs import router as blobs_router
 from app.api.v1.notifications import router as notifications_router
-from app.core.database import get_db
+from app.core.database import async_session, get_db
 from app.core.deps import get_optional_user
 from app.models.download import DownloadVersion
+from app.models.fingerprint import Fingerprint
+from app.models.version_file import VersionFile
 from app.models.route import Route
 from app.models.user import User
 from app.schemas.route import RoutePublic
@@ -59,6 +62,79 @@ async def list_public_versions(db=Depends(get_db)):
             for v in versions
         ],
     }
+
+
+class DiffRequest(BaseModel):
+    current_version: str
+    manifest: dict[str, str]  # {relative_path: sha256}
+
+
+class DiffChangedFile(BaseModel):
+    path: str
+    sha256: str
+    size: int
+    fingerprint_id: int
+
+
+class DiffRemovedFile(BaseModel):
+    path: str
+
+
+class DiffResponse(BaseModel):
+    latest_version: str
+    changelog: str | None = None
+    is_mandatory: bool = False
+    changed: list[DiffChangedFile] = []
+    removed: list[DiffRemovedFile] = []
+
+
+@router.post("/versions/diff", response_model=DiffResponse)
+async def diff_versions(body: DiffRequest):
+    """桌面端发送本地 manifest，返回差异文件列表"""
+    async with async_session() as db:
+        # Find latest version
+        latest = (await db.execute(
+            select(DownloadVersion).where(DownloadVersion.is_latest == True)
+        )).scalar_one_or_none()
+
+        if not latest:
+            return DiffResponse(latest_version=body.current_version)
+
+        if latest.version == body.current_version:
+            return DiffResponse(latest_version=body.current_version)
+
+        # Get all files for latest version
+        vf_rows = (await db.execute(
+            select(VersionFile, Fingerprint)
+            .join(Fingerprint, VersionFile.fingerprint_id == Fingerprint.id)
+            .where(VersionFile.version_id == latest.id)
+        )).all()
+
+        changed = []
+        manifest_paths = set(body.manifest.keys())
+
+        for vf, fp in vf_rows:
+            local_sha = body.manifest.get(vf.relative_path)
+            if not local_sha or local_sha != fp.sha256:
+                changed.append(DiffChangedFile(
+                    path=vf.relative_path,
+                    sha256=fp.sha256,
+                    size=fp.size,
+                    fingerprint_id=fp.id,
+                ))
+
+        removed = []
+        for local_path in manifest_paths:
+            if not any(vf.relative_path == local_path for vf, _ in vf_rows):
+                removed.append(DiffRemovedFile(path=local_path))
+
+        return DiffResponse(
+            latest_version=latest.version,
+            changelog=latest.changelog,
+            is_mandatory=latest.is_mandatory,
+            changed=changed,
+            removed=removed,
+        )
 
 
 @router.get("/routes", response_model=list[RoutePublic])
