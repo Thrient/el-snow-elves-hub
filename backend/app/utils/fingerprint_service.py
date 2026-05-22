@@ -22,6 +22,6 @@ async def ensure_fingerprint(db: AsyncSession, data: bytes) -> Fingerprint:
     db.add(fp)
     await db.flush()
 
-    # MinIO key = integer fingerprint ID as string
-    minio_upload(str(fp.id), data, "application/octet-stream")
+    # MinIO key = SHA256，内容寻址
+    minio_upload(fp.sha256, data, "application/octet-stream")
     return fp

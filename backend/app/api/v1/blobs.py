@@ -20,7 +20,7 @@ async def download_blob(fingerprint_id: int):
         if not fp:
             raise HTTPException(404, "文件不存在")
 
-        gen, ct, length = stream_file(str(fingerprint_id))
+        gen, ct, length = stream_file(fp.sha256)
 
         headers = {}
         if length:
