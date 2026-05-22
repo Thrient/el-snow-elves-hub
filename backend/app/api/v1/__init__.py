@@ -13,6 +13,8 @@ from app.api.v1.uploads import router as uploads_router
 from app.api.v1.forum import router as forum_router
 from app.api.v1.blobs import router as blobs_router
 from app.api.v1.notifications import router as notifications_router
+from app.api.v1.client_stream import router as client_stream_router
+from app.api.v1.admin_stream import router as admin_stream_router
 from app.core.database import async_session, get_db
 from app.core.deps import get_optional_user
 from app.models.download import DownloadVersion
@@ -33,6 +35,8 @@ router.include_router(uploads_router)
 router.include_router(forum_router)
 router.include_router(blobs_router)
 router.include_router(notifications_router)
+router.include_router(client_stream_router)
+router.include_router(admin_stream_router)
 
 
 @router.get("/ping")
