@@ -47,10 +47,12 @@ app.add_middleware(
         "https://192.168.3.21:5173",
         "https://nas.elarion.cn:5173",
         "https://hub.elarion.cn:5173",
+        "https://127.0.0.1:42001",
     ],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
+    allow_origin_regex=r"https://127\.0\.0\.1:\d+",
 )
 
 
