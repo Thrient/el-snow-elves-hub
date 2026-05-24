@@ -9,7 +9,7 @@ from sqlalchemy import select, func, desc, and_, or_, delete as sa_delete
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_db
-from app.core.deps import get_current_user, get_optional_user
+from app.core.deps import get_current_user, get_optional_user, require_perm_any
 from app.core.response import ok
 from app.models.forum import ForumBoard, ForumPost
 from app.models.fingerprint import Fingerprint
@@ -185,7 +185,7 @@ async def _reply_out(r: ForumPost, db: AsyncSession, parent_map: dict[int, Forum
 # ── Boards ──
 
 @router.get("/boards")
-async def list_boards(db: AsyncSession = Depends(get_db)):
+async def list_boards(db: AsyncSession = Depends(get_db), _=Depends(require_perm_any("forum:list"))):
     result = await db.execute(select(ForumBoard).order_by(ForumBoard.sort_order))
     boards = result.scalars().all()
     out = []
@@ -207,6 +207,7 @@ async def search_threads(
     page: int = Query(1, ge=1),
     size: int = Query(20, ge=1, le=50),
     db: AsyncSession = Depends(get_db),
+    _=Depends(require_perm_any("forum:list")),
 ):
     like = f"%{q}%"
     base = select(ForumPost).where(
@@ -234,6 +235,7 @@ async def list_threads(
     page: int = Query(1, ge=1),
     size: int = Query(20, ge=1, le=50),
     db: AsyncSession = Depends(get_db),
+    _=Depends(require_perm_any("forum:list")),
 ):
     board = (await db.execute(select(ForumBoard).where(ForumBoard.id == board_id))).scalar_one_or_none()
     if not board:
@@ -260,6 +262,7 @@ async def get_thread(
     request: Request,
     db: AsyncSession = Depends(get_db),
     user: User | None = Depends(get_optional_user),
+    _=Depends(require_perm_any("forum:list")),
 ):
     t = (await db.execute(select(ForumPost).where(
         and_(ForumPost.id == thread_id, ForumPost.parent_id == None)
@@ -326,6 +329,7 @@ async def create_thread(
     body: ThreadCreate,
     user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
+    _=Depends(require_perm_any("forum:post")),
 ):
     board = (await db.execute(select(ForumBoard).where(ForumBoard.id == body.board_id))).scalar_one_or_none()
     if not board:
@@ -351,6 +355,7 @@ async def create_reply(
     body: ReplyCreate,
     user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
+    _=Depends(require_perm_any("forum:post")),
 ):
     thread = (await db.execute(select(ForumPost).where(
         and_(ForumPost.id == thread_id, ForumPost.parent_id == None)
@@ -415,12 +420,13 @@ async def update_thread(
     body: ThreadUpdate,
     user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
+    _=Depends(require_perm_any("forum:post")),
 ):
     t = (await db.execute(select(ForumPost).where(ForumPost.id == thread_id))).scalar_one_or_none()
     if not t:
         raise HTTPException(404, "帖子不存在")
-    if t.author_id != user.id and not user.has_permission("forum.manage"):
-        raise HTTPException(403, "无权编辑")
+    if t.author_id != user.id:
+        raise HTTPException(403, "只能编辑自己的帖子")
 
     if body.title is not None and t.parent_id is None:
         t.title = body.title
@@ -437,12 +443,13 @@ async def delete_thread(
     thread_id: int,
     user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
+    _=Depends(require_perm_any("forum:delete")),
 ):
     t = (await db.execute(select(ForumPost).where(ForumPost.id == thread_id))).scalar_one_or_none()
     if not t:
         raise HTTPException(404, "帖子不存在")
-    if t.author_id != user.id and not user.has_permission("forum:delete"):
-        raise HTTPException(403, "无权删除")
+    if t.author_id != user.id:
+        raise HTTPException(403, "只能删除自己的帖子")
 
     # If it's a thread, delete all replies too
     if t.parent_id is None:
@@ -472,10 +479,8 @@ async def admin_thread_action(
     body: AdminAction,
     user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
+    _=Depends(require_perm_any("forum:manage")),
 ):
-    if not user.has_permission("forum:manage"):
-        raise HTTPException(403, "需要论坛管理权限")
-
     t = (await db.execute(select(ForumPost).where(ForumPost.id == thread_id))).scalar_one_or_none()
     if not t:
         raise HTTPException(404, "帖子不存在")
@@ -502,6 +507,7 @@ async def toggle_like(
     post_id: int,
     user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
+    _=Depends(require_perm_any("forum:post")),
 ):
     p = (await db.execute(select(ForumPost).where(ForumPost.id == post_id))).scalar_one_or_none()
     if not p:

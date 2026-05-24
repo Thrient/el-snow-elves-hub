@@ -1,7 +1,7 @@
 import { useEffect, useState, type FC } from "react";
 import { useParams, useNavigate } from "react-router-dom";
 import { Card, Row, Col, Tag, Typography, Spin, Button } from "antd";
-import { UserOutlined, DownloadOutlined, LikeOutlined, CalendarOutlined, FileOutlined, ArrowLeftOutlined, AppstoreOutlined } from "@ant-design/icons";
+import { UserOutlined, DownloadOutlined, LikeOutlined, CommentOutlined, CalendarOutlined, FileOutlined, ArrowLeftOutlined, AppstoreOutlined } from "@ant-design/icons";
 import { taskApi, type TaskItem } from "../api/tasks";
 
 const { Title } = Typography;
@@ -30,7 +30,7 @@ const AuthorPage: FC = () => {
   const totalLikes = tasks.reduce((s, t) => s + t.like_count, 0);
 
   return (
-    <div style={{ maxWidth: 920, margin: "0 auto" }}>
+    <div style={{ width: "100%", maxWidth: 1200, margin: "0 auto" }}>
       <style>{animKeyframes}</style>
 
       <Button type="text" icon={<ArrowLeftOutlined />} onClick={() => navigate(-1)}
@@ -104,46 +104,90 @@ const AuthorPage: FC = () => {
                 style={{
                   borderRadius: 14, overflow: "hidden",
                   border: "1px solid #e8e3dc",
-                  animation: `card-in 0.35s ease-out ${idx * 0.05}s both`,
-                  transition: "transform 0.2s ease, box-shadow 0.2s ease",
+                  animation: `card-in 0.4s ease-out ${idx * 0.04}s both`,
+                  transition: "transform 0.25s ease, box-shadow 0.25s ease, border-color 0.25s ease",
                 }}
                 styles={{ body: { padding: "12px 14px" } }}
+                onMouseEnter={(e) => {
+                  const el = e.currentTarget as HTMLElement;
+                  el.style.transform = "translateY(-4px)";
+                  el.style.boxShadow = "0 12px 32px rgba(0,0,0,0.08)";
+                  el.style.borderColor = "#d4513b";
+                }}
+                onMouseLeave={(e) => {
+                  const el = e.currentTarget as HTMLElement;
+                  el.style.transform = "translateY(0)";
+                  el.style.boxShadow = "none";
+                  el.style.borderColor = "#e8e3dc";
+                }}
                 cover={
                   task.cover_url ? (
-                    <div style={{ height: 130, overflow: "hidden" }}>
-                      <img src={task.cover_url} alt={task.title} loading="lazy"
-                        style={{ width: "100%", height: "100%", objectFit: "cover" }} />
+                    <div style={{ height: 150, overflow: "hidden", position: "relative", background: "#f3f0ec" }}>
+                      <img
+                        src={task.cover_url}
+                        alt={task.title}
+                        loading="lazy"
+                        style={{
+                          width: "100%", height: "100%", objectFit: "cover",
+                          transition: "transform 0.4s ease",
+                        }}
+                        onMouseEnter={(e) => { (e.currentTarget as HTMLElement).style.transform = "scale(1.06)"; }}
+                        onMouseLeave={(e) => { (e.currentTarget as HTMLElement).style.transform = "scale(1)"; }}
+                      />
+                      <div style={{
+                        position: "absolute", bottom: 0, left: 0, right: 0,
+                        height: 50, background: "linear-gradient(transparent, rgba(0,0,0,0.3))",
+                      }} />
                     </div>
                   ) : (
                     <div style={{
-                      height: 130, background: "linear-gradient(135deg, #f5f0e8, #ebe4d8)",
+                      height: 150, position: "relative",
+                      background: "linear-gradient(145deg, #f5f0e8, #ebe4d8)",
                       display: "flex", alignItems: "center", justifyContent: "center",
                     }}>
-                      <AppstoreOutlined style={{ fontSize: 28, color: "#d4c8b8" }} />
+                      <AppstoreOutlined style={{ fontSize: 36, color: "#d4c8b8" }} />
                     </div>
                   )
                 }
-                onMouseEnter={(e) => {
-                  e.currentTarget.style.transform = "translateY(-3px)";
-                  e.currentTarget.style.boxShadow = "0 8px 24px rgba(0,0,0,0.07)";
-                }}
-                onMouseLeave={(e) => {
-                  e.currentTarget.style.transform = "translateY(0)";
-                  e.currentTarget.style.boxShadow = "none";
-                }}
               >
-                <Tag style={{
-                  marginBottom: 6, fontSize: 10, background: "#fef3ef",
-                  color: "#d4513b", border: "none", borderRadius: 4,
+                <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 6 }}>
+                  <Tag style={{
+                    fontSize: 10, lineHeight: "18px", borderRadius: 4, margin: 0,
+                    padding: "0 6px", background: "#fef3ef", color: "#d4513b", border: "none",
+                  }}>
+                    {task.category}
+                  </Tag>
+                  <span style={{ fontSize: 10, color: "#c4bbb2" }}>v{task.version}</span>
+                </div>
+
+                <div style={{
+                  fontSize: 13, fontWeight: 600, color: "#3d3630", marginBottom: 4,
+                  overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap",
                 }}>
-                  {task.category}
-                </Tag>
-                <div style={{ fontWeight: 600, fontSize: 13, color: "#3d3630", marginBottom: 8, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
                   {task.title}
                 </div>
-                <div style={{ display: "flex", gap: 14, fontSize: 11, color: "#b8afa6" }}>
-                  <span><DownloadOutlined /> {task.download_count.toLocaleString()}</span>
-                  <span><LikeOutlined /> {task.like_count.toLocaleString()}</span>
+
+                <div style={{ fontSize: 11, color: "#b8afa6", marginBottom: 8 }}>
+                  <UserOutlined style={{ marginRight: 4 }} />{task.author_name}
+                </div>
+
+                <div style={{
+                  display: "flex", gap: 14, fontSize: 11, color: "#b8afa6",
+                  paddingTop: 8, borderTop: "1px solid #f5f2ee",
+                }}>
+                  <span style={{ display: "flex", alignItems: "center", gap: 3 }}>
+                    <DownloadOutlined /> {task.download_count.toLocaleString()}
+                  </span>
+                  <span style={{
+                    display: "flex", alignItems: "center", gap: 3,
+                    color: task.liked ? "#d4513b" : undefined,
+                    fontWeight: task.liked ? 500 : undefined,
+                  }}>
+                    <LikeOutlined /> {task.like_count.toLocaleString()}
+                  </span>
+                  <span style={{ display: "flex", alignItems: "center", gap: 3 }}>
+                    <CommentOutlined /> {task.comment_count.toLocaleString()}
+                  </span>
                 </div>
               </Card>
             </Col>

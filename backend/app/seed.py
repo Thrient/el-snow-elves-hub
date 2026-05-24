@@ -19,6 +19,7 @@ async def seed():
     async with engine.begin() as conn:
         for sql in [
             "ALTER TABLE tasks ADD COLUMN view_count INT DEFAULT 0",
+            "ALTER TABLE tasks ADD COLUMN filename VARCHAR(255)",
             "ALTER TABLE download_records ADD COLUMN ip_address VARCHAR(45)",
             "ALTER TABLE forum_posts ADD COLUMN thread_id INT",
             "ALTER TABLE forum_posts ADD COLUMN like_count INT DEFAULT 0",
@@ -64,6 +65,7 @@ async def seed():
             "tasks.view", "tasks.approve", "tasks.delete",
             "comments.delete",
             "forum.view", "forum.post", "forum.manage",
+            "file:download",
         }
         for code in deprecated:
             old = (await db.execute(select(Permission).where(Permission.code == code))).scalar_one_or_none()
@@ -119,6 +121,46 @@ async def seed():
 
         await db.flush()
 
+        # ── Assign base permissions to user role ──
+        base_user_perms = [
+            "file:check", "file:upload",
+            "task:list", "task:download", "task:create", "task:like", "task:comment", "task:delete",
+            "forum:list", "forum:post", "forum:delete",
+            "version:list", "version:download",
+            "notification:list", "notification:read",
+            "user:profile", "comment:delete",
+        ]
+        for perm_code in base_user_perms:
+            p = next((x for x in all_perms if x.code == perm_code), None)
+            if not p:
+                continue
+            existing_rp = (await db.execute(
+                select(RolePermission).where(
+                    RolePermission.role_id == user_role.id,
+                    RolePermission.permission_id == p.id,
+                )
+            )).scalar_one_or_none()
+            if not existing_rp:
+                db.add(RolePermission(role_id=user_role.id, permission_id=p.id))
+
+        # ── Assign public permissions to anonymous role ──
+        anon_perms = [
+            "public:ping", "route:list",
+            "auth:login", "auth:register", "auth:refresh",
+        ]
+        for perm_code in anon_perms:
+            p = next((x for x in all_perms if x.code == perm_code), None)
+            if not p:
+                continue
+            existing_rp = (await db.execute(
+                select(RolePermission).where(
+                    RolePermission.role_id == anon_role.id,
+                    RolePermission.permission_id == p.id,
+                )
+            )).scalar_one_or_none()
+            if not existing_rp:
+                db.add(RolePermission(role_id=anon_role.id, permission_id=p.id))
+
         # ── Admin user ──
         admin_user = (await db.execute(select(User).where(User.email == "admin@elsnow.com"))).scalar_one_or_none()
         if admin_user:
@@ -138,7 +180,7 @@ async def seed():
                 select(User).where(User.email == "admin@elsnow.com")
             )).scalar_one()
             db.add(UserRole(user_id=new_admin.id, role_id=admin_role.id))
-            print("已创建管理员: admin@elsnow.com / Admin@123")
+            print("已创建管理员: admin@elsnow.com")
 
         # ── Sample download version ──
         ver = (await db.execute(select(DownloadVersion).limit(1))).scalar_one_or_none()

@@ -7,10 +7,11 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from datetime import datetime
 
 from app.core.database import get_db
-from app.core.deps import get_current_user
+from app.core.deps import get_current_user, require_perm_any
 from app.models.task import DownloadRecord, Task, TaskLike
 from app.models.user import User
 from app.utils.fingerprint_service import store, file_url
+from app.utils.file_validator import validate_file_size, validate_image
 
 router = APIRouter(prefix="/users", tags=["用户"])
 
@@ -32,7 +33,7 @@ class LikeItem(BaseModel):
 
 
 @router.get("/me/downloads")
-async def my_downloads(user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db)):
+async def my_downloads(user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db), _=Depends(require_perm_any("user:profile"))):
     result = await db.execute(
         select(DownloadRecord).where(DownloadRecord.user_id == user.id).order_by(desc(DownloadRecord.downloaded_at)).limit(50)
     )
@@ -44,7 +45,7 @@ async def my_downloads(user: User = Depends(get_current_user), db: AsyncSession 
 
 
 @router.get("/me/likes")
-async def my_likes(user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db)):
+async def my_likes(user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db), _=Depends(require_perm_any("user:profile"))):
     result = await db.execute(
         select(TaskLike).where(TaskLike.user_id == user.id).order_by(desc(TaskLike.created_at)).limit(50)
     )
@@ -56,11 +57,11 @@ async def my_likes(user: User = Depends(get_current_user), db: AsyncSession = De
 
 
 @router.post("/me/avatar")
-async def upload_avatar(file: UploadFile = File(...), user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db)):
-    if not file.content_type or not file.content_type.startswith("image/"):
-        return {"code": -1, "message": "仅支持图片格式"}
+async def upload_avatar(file: UploadFile = File(...), user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db), _=Depends(require_perm_any("user:profile"))):
+    validate_file_size(file)
     data = await file.read()
-    fp = await store(db, data, file.filename or "avatar.png", file.content_type)
+    validate_image(data)
+    fp = await store(db, data, file.filename or "avatar.png", file.content_type or "image/png")
     user.avatar_id = fp.id
     await db.commit()
     return {"code": 0, "message": "ok", "data": {"avatar_url": file_url(fp)}}

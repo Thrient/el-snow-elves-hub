@@ -49,6 +49,7 @@ export interface AdminUser {
   role_names: string[];
   role_ids: number[];
   permissions: string[] | null;
+  is_disabled: boolean;
   created_at: string;
 }
 
@@ -112,6 +113,10 @@ export const adminApi = {
   listUsers: () => API.get<AdminUser[]>("/admin/users").then((r) => r.data),
   updateUserRoles: (userId: number, roleIds: number[]) =>
     API.put(`/admin/users/${userId}/roles`, { role_ids: roleIds }),
+  disableUser: (userId: number) =>
+    API.put(`/admin/users/${userId}/disable`).then((r) => r.data),
+  deleteUser: (userId: number) =>
+    API.delete(`/admin/users/${userId}`).then((r) => r.data),
 
   // Roles
   listRoles: () => API.get<RoleItem[]>("/admin/roles").then((r) => r.data),

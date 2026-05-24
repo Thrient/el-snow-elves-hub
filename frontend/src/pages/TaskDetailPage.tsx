@@ -1,7 +1,7 @@
 import { useEffect, useState, type FC } from "react";
 import { useParams, useNavigate } from "react-router-dom";
-import { Button, Tag, Input, message, Empty, Typography, Spin } from "antd";
-import { DownloadOutlined, LikeOutlined, LikeFilled, UserOutlined, ArrowLeftOutlined, CommentOutlined, SendOutlined, CalendarOutlined, FileOutlined } from "@ant-design/icons";
+import { Button, Tag, Input, message, Empty, Typography, Spin, Popconfirm } from "antd";
+import { DownloadOutlined, LikeOutlined, LikeFilled, UserOutlined, ArrowLeftOutlined, CommentOutlined, SendOutlined, CalendarOutlined, FileOutlined, DeleteOutlined } from "@ant-design/icons";
 import { taskApi, type TaskItem, type CommentItem } from "../api/tasks";
 import { useAuthStore } from "../store/auth";
 
@@ -51,6 +51,13 @@ const TaskDetailPage: FC = () => {
     setCommentText("");
     message.success("评论已发布");
     load();
+  };
+
+  const handleDelete = async () => {
+    if (!task) return;
+    await taskApi.delete(task.id);
+    message.success("任务已删除");
+    navigate("/market");
   };
 
   if (loading) {
@@ -108,7 +115,7 @@ const TaskDetailPage: FC = () => {
             <span>v{task.version}</span>
           </div>
 
-          <Paragraph style={{ color: "#6b5e55", fontSize: 14, lineHeight: 1.9, marginBottom: 24 }}>
+          <Paragraph style={{ color: "#6b5e55", fontSize: 14, lineHeight: 1.9, marginBottom: 24, whiteSpace: "pre-line" }}>
             {task.description || "暂无描述"}
           </Paragraph>
 
@@ -136,6 +143,24 @@ const TaskDetailPage: FC = () => {
             >
               {task.liked ? "已点赞" : "点赞"} ({task.like_count.toLocaleString()})
             </Button>
+            {user?.id === task.author_id && (
+              <Popconfirm
+                title="确定删除此任务？"
+                description="删除后无法恢复"
+                onConfirm={handleDelete}
+                okText="删除"
+                cancelText="取消"
+                okButtonProps={{ danger: true }}
+              >
+                <Button
+                  size="large"
+                  icon={<DeleteOutlined />}
+                  style={{ borderRadius: 12, height: 44, padding: "0 24px", fontWeight: 500 }}
+                >
+                  删除
+                </Button>
+              </Popconfirm>
+            )}
           </div>
 
           {/* Comments */}

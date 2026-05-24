@@ -59,3 +59,39 @@ def require_perm(perm: str) -> Callable:
         return user
 
     return checker
+
+
+async def get_data_scope(user: User | None) -> str:
+    """获取用户有效数据范围 — 多角色取最宽松值"""
+    if not user:
+        return "self"
+    for role in user.roles:
+        if role.data_scope == "all":
+            return "all"
+    return "self"
+
+
+def require_perm_any(perm: str) -> Callable:
+    """权限校验（含匿名角色）：未登录用户检查匿名角色权限，已登录检查全部角色"""
+
+    async def checker(
+        user: User | None = Depends(get_optional_user),
+        db: AsyncSession = Depends(get_db),
+    ) -> User | None:
+        if user and user.has_permission(perm):
+            return user
+        # 未登录：查匿名角色
+        from app.models.rbac import Role
+        anon = (await db.execute(
+            select(Role).where(Role.name == "anonymous")
+        )).scalar_one_or_none()
+        anon_perms: set[str] = set()
+        if anon and anon.permissions:
+            anon_perms = {p.code for p in anon.permissions}
+        if perm in anon_perms:
+            return user  # None for unauthenticated, User for authenticated
+        if not user:
+            raise HTTPException(status.HTTP_401_UNAUTHORIZED, detail="需要登录")
+        raise HTTPException(status.HTTP_403_FORBIDDEN, detail=f"需要权限: {perm}")
+
+    return checker

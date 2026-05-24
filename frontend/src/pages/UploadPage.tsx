@@ -42,7 +42,7 @@ const UploadPage: FC = () => {
   const [speed, setSpeed] = useState(0);
   const [fingerprintId, setFingerprintId] = useState<number | null>(null);
   const [dragOver, setDragOver] = useState(false);
-  const [form, setForm] = useState({ title: "", description: "", tags: "", version: "1.0" });
+  const [form, setForm] = useState({ title: "", description: "", tags: "", version: "1.0.0" });
   const fileInputRef = useRef<HTMLInputElement>(null);
   const speedSamples = useRef<number[]>([]);
 
@@ -135,8 +135,9 @@ const UploadPage: FC = () => {
         description: form.description.trim(),
         category: "综合",
         tags: form.tags.trim(),
-        version: form.version.trim() || "1.0",
+        version: form.version.trim() || "1.0.0",
         zip_file_id: fingerprintId,
+        filename: file?.name,
         cover: coverFile || undefined,
       });
       message.success("发布成功");

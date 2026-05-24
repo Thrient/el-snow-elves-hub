@@ -1,12 +1,12 @@
 """断点续传 — 分片上传 API"""
 import io, hashlib
-from fastapi import APIRouter, Depends, HTTPException, Query, Request
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, UploadFile
 from pydantic import BaseModel
 from sqlalchemy import select, and_
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_db
-from app.core.deps import get_current_user
+from app.core.deps import get_current_user, require_perm, require_perm_any
 from app.models.upload import Upload
 from app.models.user import User
 from app.utils.minio import upload_file as minio_upload, download_file as minio_download, get_s3
@@ -45,8 +45,8 @@ async def _cleanup_expired(db: AsyncSession):
 
 
 @router.post("/cleanup")
-async def cleanup_expired_uploads(db: AsyncSession = Depends(get_db)):
-    """清理过期上传会话（24小时未完成），可在 init 时顺便调用"""
+async def cleanup_expired_uploads(db: AsyncSession = Depends(get_db), _=Depends(require_perm("admin:access"))):
+    """清理过期上传会话（24小时未完成）"""
     count = await _cleanup_expired(db)
     return {"code": 0, "message": f"清理了 {count} 个过期上传"}
 
@@ -58,7 +58,7 @@ class InitRequest(BaseModel):
 
 
 @router.post("/init")
-async def init_upload(body: InitRequest, user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db)):
+async def init_upload(body: InitRequest, user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db), _=Depends(require_perm_any("file:upload"))):
     upload = Upload(filename=body.filename, total_size=body.total_size, total_chunks=body.total_chunks)
     db.add(upload)
     await db.commit()
@@ -66,14 +66,16 @@ async def init_upload(body: InitRequest, user: User = Depends(get_current_user),
 
 
 @router.post("/{upload_id}/chunk")
-async def upload_chunk(upload_id: str, n: int = Query(...), request: Request = None,
-                       user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db)):
+async def upload_chunk(upload_id: str, n: int = Query(...), chunk: UploadFile = None,
+                       user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db), _=Depends(require_perm_any("file:upload"))):
     result = await db.execute(select(Upload).where(Upload.upload_id == upload_id))
     upload = result.scalar_one_or_none()
     if not upload:
         raise HTTPException(404, "上传会话不存在或已过期")
+    if not chunk:
+        raise HTTPException(400, "缺少分片数据")
 
-    data = await request.body()
+    data = await chunk.read()
     minio_upload(f"chunks/{upload_id}/{n}", data, "application/octet-stream")
 
     chunks = list(upload.uploaded_chunks or [])
@@ -85,7 +87,7 @@ async def upload_chunk(upload_id: str, n: int = Query(...), request: Request = N
 
 
 @router.post("/{upload_id}/complete")
-async def complete_upload(upload_id: str, user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db)):
+async def complete_upload(upload_id: str, user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db), _=Depends(require_perm_any("file:upload"))):
     result = await db.execute(select(Upload).where(Upload.upload_id == upload_id))
     upload = result.scalar_one_or_none()
     if not upload:

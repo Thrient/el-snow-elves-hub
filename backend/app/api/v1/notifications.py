@@ -10,7 +10,7 @@ from sqlalchemy import select, func, desc, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_db
-from app.core.deps import get_current_user
+from app.core.deps import get_current_user, require_perm_any
 from app.core.response import ok
 from app.models.notification import Notification
 from app.models.user import User
@@ -133,6 +133,7 @@ async def list_notifications(
     size: int = Query(20, ge=1, le=50),
     user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
+    _=Depends(require_perm_any("notification:list")),
 ):
     q = select(Notification).where(Notification.receiver_id == user.id).order_by(desc(Notification.created_at))
     total = (await db.execute(select(func.count()).select_from(q.subquery()))).scalar() or 0
@@ -160,6 +161,7 @@ async def list_notifications(
 async def unread_count(
     user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
+    _=Depends(require_perm_any("notification:list")),
 ):
     count = (await db.execute(
         select(func.count(Notification.id)).where(
@@ -175,6 +177,7 @@ async def mark_read(
     id: int,
     user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
+    _=Depends(require_perm_any("notification:read")),
 ):
     n = (await db.execute(select(Notification).where(
         Notification.id == id, Notification.receiver_id == user.id
@@ -190,6 +193,7 @@ async def mark_read(
 async def mark_all_read(
     user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
+    _=Depends(require_perm_any("notification:read")),
 ):
     await db.execute(
         update(Notification).where(

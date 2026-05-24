@@ -16,8 +16,9 @@ class Task(Base):
     author_id: Mapped[int] = mapped_column(ForeignKey("users.id"), nullable=False)
     category: Mapped[str] = mapped_column(String(32), default="综合")
     tags: Mapped[str | None] = mapped_column(String(500), nullable=True)  # "采集,日常,江南"
-    version: Mapped[str] = mapped_column(String(32), default="1.0")
+    version: Mapped[str] = mapped_column(String(32), default="1.0.0")
     fingerprint_id: Mapped[int | None] = mapped_column(ForeignKey("fingerprints.id"), nullable=True, comment="任务ZIP文件指纹ID")
+    filename: Mapped[str | None] = mapped_column(String(255), nullable=True, comment="原始文件名")
     file_size: Mapped[int | None] = mapped_column(Integer, nullable=True)
     cover_fingerprint_id: Mapped[int | None] = mapped_column(ForeignKey("fingerprints.id"), nullable=True, comment="封面图指纹ID")
     status: Mapped[str] = mapped_column(String(16), default="approved")  # pending | approved | rejected

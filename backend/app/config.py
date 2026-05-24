@@ -37,5 +37,10 @@ class Settings(BaseSettings):
     # Upload
     max_upload_size: int = 100 * 1024 * 1024
 
+    # Rate limiting (per-IP, per-window)
+    rate_limit_default: str = "60/minute"
+    rate_limit_auth: str = "5/minute"
+    rate_limit_upload: str = "10/minute"
+
 
 settings = Settings()

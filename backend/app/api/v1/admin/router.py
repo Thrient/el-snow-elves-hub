@@ -10,11 +10,15 @@ from app.core.database import async_session, get_db
 from app.core.deps import get_current_user, require_perm
 from app.core.online_tracker import counts
 from app.utils.fingerprint_service import store
+from app.utils.file_validator import validate_file_size
 from app.models.user import User
 from app.models.download import DownloadVersion
 from app.models.fingerprint import Fingerprint
 from app.models.task import Task as TaskModel
 from app.models.version_file import VersionFile
+from app.models.task import Task as TaskModel, Comment, TaskLike, DownloadRecord, TaskView
+from app.models.forum import ForumPost
+from app.models.notification import Notification
 from app.models.rbac import Role as RoleModel, Permission as PermissionModel, RolePermission, UserRole
 
 router = APIRouter(
@@ -40,6 +44,7 @@ class UserItem(BaseModel):
     role_names: list = []
     role_ids: list = []
     permissions: list | None = None
+    is_disabled: bool = False
     created_at: datetime
 
     model_config = {"from_attributes": True}
@@ -109,7 +114,8 @@ async def get_stats(db: AsyncSession = Depends(get_db)):
             dependencies=[Depends(require_perm("user:list"))])
 async def list_users(db: AsyncSession = Depends(get_db)):
     result = await db.execute(select(User).order_by(User.created_at.desc()))
-    return [UserItem.model_validate(u) for u in result.scalars().all()]
+    users = result.scalars().all()
+    return [UserItem.model_validate(u) for u in users]
 
 
 class UserRoleUpdate(BaseModel):
@@ -127,6 +133,63 @@ async def update_user_roles(user_id: int, body: UserRoleUpdate, db: AsyncSession
     await db.execute(delete(UserRole).where(UserRole.user_id == user_id))
     for rid in body.role_ids:
         db.add(UserRole(user_id=user_id, role_id=rid))
+    await db.commit()
+    return {"ok": True}
+
+
+@router.put("/users/{user_id}/disable",
+            dependencies=[Depends(require_perm("user:assign"))])
+async def toggle_disable_user(user_id: int, db: AsyncSession = Depends(get_db)):
+    result = await db.execute(select(User).where(User.id == user_id))
+    user = result.scalar_one_or_none()
+    if not user:
+        raise HTTPException(status_code=404, detail="用户不存在")
+    user.is_disabled = not user.is_disabled
+    await db.commit()
+    return {"ok": True, "is_disabled": user.is_disabled}
+
+
+@router.delete("/users/{user_id}",
+               dependencies=[Depends(require_perm("user:assign"))])
+async def delete_user(user_id: int, db: AsyncSession = Depends(get_db)):
+    result = await db.execute(select(User).where(User.id == user_id))
+    user = result.scalar_one_or_none()
+    if not user:
+        raise HTTPException(status_code=404, detail="用户不存在")
+
+    from sqlalchemy import update as sql_update
+
+    # 清理 ForumPost：先解除自引用外键，再删帖
+    user_post_ids = (
+        (await db.execute(select(ForumPost.id).where(ForumPost.author_id == user_id)))
+        .scalars().all()
+    )
+    if user_post_ids:
+        await db.execute(
+            sql_update(ForumPost)
+            .where(ForumPost.parent_id.in_(user_post_ids))
+            .values(parent_id=None)
+        )
+        await db.execute(
+            sql_update(ForumPost)
+            .where(ForumPost.thread_id.in_(user_post_ids))
+            .values(thread_id=None)
+        )
+        await db.execute(delete(ForumPost).where(ForumPost.author_id == user_id))
+
+    # 清理其余关联数据
+    await db.execute(delete(TaskLike).where(TaskLike.user_id == user_id))
+    await db.execute(delete(Comment).where(Comment.user_id == user_id))
+    await db.execute(delete(Notification).where(Notification.receiver_id == user_id))
+    await db.execute(delete(TaskModel).where(TaskModel.author_id == user_id))
+
+    # 可空字段置 NULL
+    await db.execute(sql_update(Notification).where(Notification.sender_id == user_id).values(sender_id=None))
+    await db.execute(sql_update(DownloadRecord).where(DownloadRecord.user_id == user_id).values(user_id=None))
+    await db.execute(sql_update(TaskView).where(TaskView.user_id == user_id).values(user_id=None))
+
+    await db.flush()
+    await db.delete(user)
     await db.commit()
     return {"ok": True}
 
@@ -163,6 +226,7 @@ async def update_role_permissions(role_id: int, body: PermUpdate, db: AsyncSessi
 class RoleCreate(BaseModel):
     name: str
     description: str | None = None
+    data_scope: str = "self"
 
 
 @router.post("/roles", status_code=status.HTTP_201_CREATED,
@@ -171,11 +235,38 @@ async def create_role(body: RoleCreate, db: AsyncSession = Depends(get_db)):
     existing = (await db.execute(select(RoleModel).where(RoleModel.name == body.name))).scalar_one_or_none()
     if existing:
         raise HTTPException(status_code=400, detail="角色名已存在")
-    role = RoleModel(name=body.name, description=body.description)
+    role = RoleModel(name=body.name, description=body.description, data_scope=body.data_scope)
     db.add(role)
     await db.commit()
     await db.refresh(role)
-    return {"id": role.id, "name": role.name, "description": role.description, "permissions": []}
+    return {"id": role.id, "name": role.name, "description": role.description, "data_scope": role.data_scope, "permissions": []}
+
+
+class RoleUpdate(BaseModel):
+    name: str | None = None
+    description: str | None = None
+    data_scope: str | None = None
+
+
+@router.put("/roles/{role_id}",
+            dependencies=[Depends(require_perm("role:update"))])
+async def update_role(role_id: int, body: RoleUpdate, db: AsyncSession = Depends(get_db)):
+    result = await db.execute(select(RoleModel).where(RoleModel.id == role_id))
+    role = result.scalar_one_or_none()
+    if not role:
+        raise HTTPException(status_code=404, detail="角色不存在")
+    if body.name is not None:
+        dup = (await db.execute(select(RoleModel).where(RoleModel.name == body.name, RoleModel.id != role_id))).scalar_one_or_none()
+        if dup:
+            raise HTTPException(status_code=400, detail="角色名已存在")
+        role.name = body.name
+    if body.description is not None:
+        role.description = body.description
+    if body.data_scope is not None:
+        role.data_scope = body.data_scope
+    await db.commit()
+    await db.refresh(role)
+    return {"id": role.id, "name": role.name, "description": role.description, "data_scope": role.data_scope}
 
 
 @router.delete("/roles/{role_id}",
@@ -274,6 +365,7 @@ async def upload_blob(
     user: User = Depends(get_current_user),
 ):
     """上传单个文件 blob"""
+    validate_file_size(file)
     data = await file.read()
     async with async_session() as db:
         fp = await store(db, data)

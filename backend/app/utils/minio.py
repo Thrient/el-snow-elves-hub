@@ -47,6 +47,11 @@ def download_file(key: str) -> tuple[bytes, str]:
     return resp["Body"].read(), resp.get("ContentType", "application/octet-stream")
 
 
+def delete_file(key: str):
+    s3 = get_s3()
+    s3.delete_object(Bucket=settings.minio_bucket, Key=key)
+
+
 def stream_file(key: str):
     """流式读取 MinIO 文件，返回 (generator, content_type, content_length)"""
     s3 = get_s3()

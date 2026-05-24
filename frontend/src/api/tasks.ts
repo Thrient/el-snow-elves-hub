@@ -68,6 +68,7 @@ export const taskApi = {
   createWithFileId: (params: {
     title: string; description: string; category: string;
     tags: string; version: string; zip_file_id: number;
+    filename?: string;
     cover?: File;
   }) => {
     const fd = new FormData();
@@ -77,6 +78,7 @@ export const taskApi = {
     fd.append("tags", params.tags);
     fd.append("version", params.version);
     fd.append("zip_file_id", String(params.zip_file_id));
+    if (params.filename) fd.append("filename", params.filename);
     if (params.cover) fd.append("cover", params.cover);
     return API.post("/tasks", fd, { headers: { "Content-Type": "multipart/form-data" } }).then((r) => r.data);
   },
@@ -86,4 +88,7 @@ export const taskApi = {
 
   userTasks: (userId: number) =>
     API.get<{ code: number; data: TaskItem[] }>(`/tasks/user/${userId}`).then((r) => r.data.data),
+
+  delete: (id: number) =>
+    API.delete(`/tasks/${id}`).then((r) => r.data),
 };

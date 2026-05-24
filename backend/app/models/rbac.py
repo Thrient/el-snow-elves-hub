@@ -7,6 +7,11 @@ from app.core.database import Base
 
 # 统一权限码 — 菜单 / 按钮 / API 共用
 PERMISSION_CODES = {
+    "public:ping": "健康检查",
+    "auth:login": "登录",
+    "auth:register": "注册",
+    "auth:refresh": "刷新令牌",
+
     "admin:access": "进入管理后台",
 
     "user:list": "查看用户列表",
@@ -34,6 +39,10 @@ PERMISSION_CODES = {
     "version:delete": "删除版本",
 
     "task:list": "查看任务列表",
+    "task:download": "下载任务",
+    "task:create": "创建任务",
+    "task:like": "点赞任务",
+    "task:comment": "发表评论",
     "task:approve": "审核任务",
     "task:delete": "删除任务",
 
@@ -43,6 +52,14 @@ PERMISSION_CODES = {
     "forum:manage": "管理板块",
 
     "comment:delete": "删除评论",
+
+    "notification:list": "查看通知",
+    "notification:read": "标记已读",
+
+    "user:profile": "个人中心",
+
+    "file:check": "文件指纹校验",
+    "file:upload": "上传文件",
 }
 
 WILDCARD = "*"

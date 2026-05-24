@@ -1,9 +1,9 @@
 import { useEffect, useState, type FC } from "react";
 import { useNavigate } from "react-router-dom";
-import { Card, Typography, Tabs, Input, Button, List, message, Upload } from "antd";
-import { UserOutlined, DownloadOutlined, LikeOutlined, FileOutlined, CameraOutlined } from "@ant-design/icons";
+import { Card, Typography, Tabs, Input, Button, List, message, Upload, Row, Col, Tag } from "antd";
+import { UserOutlined, DownloadOutlined, LikeOutlined, FileOutlined, CameraOutlined, CommentOutlined, AppstoreOutlined } from "@ant-design/icons";
 import { useAuthStore } from "../store/auth";
-import { taskApi } from "../api/tasks";
+import { taskApi, type TaskItem } from "../api/tasks";
 import axios from "axios";
 
 const { Title } = Typography;
@@ -36,7 +36,7 @@ const ProfilePage: FC = () => {
   if (!user) return null;
 
   return (
-    <div style={{ maxWidth: 800, margin: "0 auto" }}>
+    <div style={{ width: "100%", maxWidth: 1200, margin: "0 auto" }}>
       {/* Profile card */}
       <Card style={{ borderRadius: 12, marginBottom: 24 }}>
         <div style={{ display: "flex", alignItems: "center", gap: 16 }}>
@@ -134,24 +134,85 @@ const ProfilePage: FC = () => {
 // Sub-component for user's tasks
 const UserTasks: FC<{ userId: number }> = ({ userId }) => {
   const navigate = useNavigate();
-  const [tasks, setTasks] = useState<{ id: number; title: string; download_count: number; like_count: number }[]>([]);
+  const [tasks, setTasks] = useState<TaskItem[]>([]);
 
   useEffect(() => { taskApi.userTasks(userId).then((arr) => setTasks(arr as any)); }, [userId]);
 
+  if (tasks.length === 0) {
+    return (
+      <div style={{ textAlign: "center", padding: 40, color: "#b8afa6" }}>
+        <AppstoreOutlined style={{ fontSize: 32, marginBottom: 8, color: "#d4c8b8" }} />
+        <div>暂无已上架任务</div>
+      </div>
+    );
+  }
+
   return (
-    <List
-      dataSource={tasks}
-      renderItem={(t) => (
-        <List.Item onClick={() => navigate(`/market/${t.id}`)} style={{ cursor: "pointer" }}>
-          <span style={{ fontWeight: 500, color: "#3d3630" }}>{t.title}</span>
-          <div style={{ display: "flex", gap: 16, fontSize: 12, color: "#b8afa6" }}>
-            <span><DownloadOutlined /> {t.download_count}</span>
-            <span><LikeOutlined /> {t.like_count}</span>
-          </div>
-        </List.Item>
-      )}
-      locale={{ emptyText: "暂无已上架任务" }}
-    />
+    <Row gutter={[16, 16]}>
+      {tasks.map((task) => (
+        <Col key={task.id} xs={24} sm={12} lg={6}>
+          <Card
+            hoverable
+            onClick={() => navigate(`/market/${task.id}`)}
+            style={{
+              borderRadius: 14, overflow: "hidden",
+              border: "1px solid #e8e3dc",
+              transition: "transform 0.25s ease, box-shadow 0.25s ease, border-color 0.25s ease",
+            }}
+            styles={{ body: { padding: "12px 14px" } }}
+            onMouseEnter={(e) => {
+              const el = e.currentTarget as HTMLElement;
+              el.style.transform = "translateY(-4px)";
+              el.style.boxShadow = "0 12px 32px rgba(0,0,0,0.08)";
+              el.style.borderColor = "#d4513b";
+            }}
+            onMouseLeave={(e) => {
+              const el = e.currentTarget as HTMLElement;
+              el.style.transform = "translateY(0)";
+              el.style.boxShadow = "none";
+              el.style.borderColor = "#e8e3dc";
+            }}
+            cover={
+              task.cover_url ? (
+                <div style={{ height: 150, overflow: "hidden", position: "relative", background: "#f3f0ec" }}>
+                  <img src={task.cover_url} alt={task.title} loading="lazy"
+                    style={{ width: "100%", height: "100%", objectFit: "cover" }} />
+                </div>
+              ) : (
+                <div style={{
+                  height: 150, background: "linear-gradient(145deg, #f5f0e8, #ebe4d8)",
+                  display: "flex", alignItems: "center", justifyContent: "center",
+                }}>
+                  <AppstoreOutlined style={{ fontSize: 36, color: "#d4c8b8" }} />
+                </div>
+              )
+            }
+          >
+            <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 4 }}>
+              <Tag style={{ fontSize: 10, lineHeight: "18px", borderRadius: 4, margin: 0,
+                padding: "0 6px", background: "#fef3ef", color: "#d4513b", border: "none" }}>
+                {task.category}
+              </Tag>
+              <span style={{ fontSize: 10, color: "#c4bbb2" }}>v{task.version}</span>
+            </div>
+            <div style={{
+              fontSize: 13, fontWeight: 600, color: "#3d3630", marginBottom: 4,
+              overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap",
+            }}>
+              {task.title}
+            </div>
+            <div style={{
+              display: "flex", gap: 14, fontSize: 11, color: "#b8afa6",
+              paddingTop: 6, borderTop: "1px solid #f5f2ee",
+            }}>
+              <span><DownloadOutlined /> {task.download_count.toLocaleString()}</span>
+              <span><LikeOutlined /> {task.like_count.toLocaleString()}</span>
+              <span><CommentOutlined /> {task.comment_count.toLocaleString()}</span>
+            </div>
+          </Card>
+        </Col>
+      ))}
+    </Row>
   );
 };
 

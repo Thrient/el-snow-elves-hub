@@ -10,13 +10,14 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from urllib.parse import quote
 
 from app.core.database import get_db
-from app.core.deps import get_current_user, get_optional_user
+from app.core.deps import get_current_user, get_data_scope, get_optional_user, require_perm_any
 from app.core.response import ok, fail
 from app.models.task import Comment as CommentModel, DownloadRecord, Task, TaskLike, TaskView
 from app.models.user import User
 from app.models.fingerprint import Fingerprint
-from app.utils.minio import stream_file
+from app.utils.minio import delete_file, stream_file
 from app.utils.fingerprint_service import store, file_url as file_url_from_service
+from app.utils.file_validator import validate_file_size, validate_zip, validate_image
 
 router = APIRouter(prefix="/tasks", tags=["任务市场"])
 
@@ -88,6 +89,7 @@ async def list_tasks(
     sort: str = Query("latest"),
     db: AsyncSession = Depends(get_db),
     user: User | None = Depends(get_optional_user),
+    _=Depends(require_perm_any("task:list")),
 ):
     q = select(Task).where(Task.status == "approved")
     if search:
@@ -111,7 +113,7 @@ async def list_tasks(
 # ── Rankings (must be before /{task_id}) ──
 
 @router.get("/rankings/list")
-async def rankings(period: str = Query("all"), db: AsyncSession = Depends(get_db)):
+async def rankings(period: str = Query("all"), db: AsyncSession = Depends(get_db), _=Depends(require_perm_any("task:list"))):
     q = select(Task).where(Task.status == "approved")
     if period == "week":
         q = q.where(Task.created_at >= func.now() - 7 * 86400)
@@ -125,7 +127,7 @@ async def rankings(period: str = Query("all"), db: AsyncSession = Depends(get_db
 # ── User's tasks (must be before /{task_id}) ──
 
 @router.get("/user/{user_id}")
-async def list_user_tasks(user_id: int, db: AsyncSession = Depends(get_db), user: User | None = Depends(get_optional_user)):
+async def list_user_tasks(user_id: int, db: AsyncSession = Depends(get_db), user: User | None = Depends(get_optional_user), _=Depends(require_perm_any("task:list"))):
     result = await db.execute(
         select(Task).where(and_(Task.author_id == user_id, Task.status == "approved")).order_by(desc(Task.created_at))
     )
@@ -156,7 +158,7 @@ def _has_recent(records, user_id: int | None, ip: str) -> bool:
 # ── Detail ──
 
 @router.get("/{task_id}")
-async def get_task(task_id: int, db: AsyncSession = Depends(get_db), user: User | None = Depends(get_optional_user), request: Request = None):
+async def get_task(task_id: int, db: AsyncSession = Depends(get_db), user: User | None = Depends(get_optional_user), request: Request = None, _=Depends(require_perm_any("task:list"))):
     t = (await db.execute(select(Task).where(Task.id == task_id))).scalar_one_or_none()
     if not t:
         raise HTTPException(404, "任务不存在")
@@ -179,7 +181,7 @@ async def get_task(task_id: int, db: AsyncSession = Depends(get_db), user: User 
 # ── Download ──
 
 @router.get("/{task_id}/download")
-async def download_task(task_id: int, db: AsyncSession = Depends(get_db), user: User | None = Depends(get_optional_user), request: Request = None):
+async def download_task(task_id: int, db: AsyncSession = Depends(get_db), user: User | None = Depends(get_optional_user), request: Request = None, _=Depends(require_perm_any("task:download"))):
     t = (await db.execute(select(Task).where(Task.id == task_id))).scalar_one_or_none()
     if not t:
         raise HTTPException(404, "任务不存在")
@@ -199,15 +201,55 @@ async def download_task(task_id: int, db: AsyncSession = Depends(get_db), user: 
     if not t.file:
         raise HTTPException(404, "任务文件不存在")
     gen, ct, length = stream_file(t.file.sha256)
-    encoded = quote(t.title or "download")
+    download_name = t.filename or f"{t.title or 'download'}.zip"
+    if not download_name.endswith(".zip"):
+        download_name += ".zip"
+    encoded = quote(download_name)
     return StreamingResponse(gen, media_type=ct,
         headers={"Content-Disposition": f"attachment; filename*=UTF-8''{encoded}"})
+
+
+# ── Delete ──
+
+
+@router.delete("/{task_id}")
+async def delete_task(
+    task_id: int,
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+    _=Depends(require_perm_any("task:delete")),
+):
+    task = (await db.execute(select(Task).where(Task.id == task_id))).scalar_one_or_none()
+    if not task:
+        raise HTTPException(404, "任务不存在")
+
+    scope = await get_data_scope(user)
+    if scope == "self" and task.author_id != user.id:
+        raise HTTPException(403, "只能删除自己的任务")
+
+    # 清理关联文件（引用计数为 1 才删除物理文件）
+    for fp_id in (task.fingerprint_id, task.cover_fingerprint_id):
+        if fp_id:
+            fp = (await db.execute(select(Fingerprint).where(Fingerprint.id == fp_id))).scalar_one_or_none()
+            if fp:
+                ref_count = (await db.execute(
+                    select(func.count()).select_from(Task).where(
+                        or_(Task.fingerprint_id == fp_id, Task.cover_fingerprint_id == fp_id)
+                    )
+                )).scalar() or 0
+                if ref_count <= 1:
+                    delete_file(fp.sha256)
+                    await db.delete(fp)
+
+    await db.delete(task)
+    await db.commit()
+    return ok({})
 
 
 # ── Like ──
 
 @router.post("/{task_id}/like")
-async def toggle_like(task_id: int, user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db)):
+async def toggle_like(task_id: int, user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db), _=Depends(require_perm_any("task:like"))):
     t = (await db.execute(select(Task).where(Task.id == task_id))).scalar_one_or_none()
     if not t:
         raise HTTPException(404, "任务不存在")
@@ -228,7 +270,7 @@ async def toggle_like(task_id: int, user: User = Depends(get_current_user), db: 
 # ── Comments ──
 
 @router.get("/{task_id}/comments")
-async def list_comments(task_id: int, db: AsyncSession = Depends(get_db)):
+async def list_comments(task_id: int, db: AsyncSession = Depends(get_db), _=Depends(require_perm_any("task:list"))):
     result = await db.execute(
         select(CommentModel).where(CommentModel.task_id == task_id).order_by(CommentModel.created_at)
     )
@@ -249,7 +291,7 @@ class CommentCreate(BaseModel):
 
 
 @router.post("/{task_id}/comments", status_code=201)
-async def create_comment(task_id: int, body: CommentCreate, user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db)):
+async def create_comment(task_id: int, body: CommentCreate, user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db), _=Depends(require_perm_any("task:comment"))):
     t = (await db.execute(select(Task).where(Task.id == task_id))).scalar_one_or_none()
     if not t:
         raise HTTPException(404, "任务不存在")
@@ -266,14 +308,15 @@ async def delete_comment(
     comment_id: int,
     user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
+    _=Depends(require_perm_any("comment:delete")),
 ):
     c = (await db.execute(select(CommentModel).where(
         CommentModel.id == comment_id, CommentModel.task_id == task_id
     ))).scalar_one_or_none()
     if not c:
         raise HTTPException(404, "评论不存在")
-    if c.user_id != user.id and not user.has_permission("comment:delete"):
-        raise HTTPException(403, "无权删除")
+    if c.user_id != user.id:
+        raise HTTPException(403, "只能删除自己的评论")
     t = (await db.execute(select(Task).where(Task.id == task_id))).scalar_one()
     await db.delete(c)
     t.comment_count = max(0, t.comment_count - 1)
@@ -290,32 +333,41 @@ async def create_task(
     category: str = Form("综合"),
     tags: str = Form(""),
     version: str = Form("1.0"),
+    filename: str = Form(""),
     file: UploadFile | None = None,
     zip_file_id: int | None = Form(None),
     cover: UploadFile | None = None,
     user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
+    _=Depends(require_perm_any("task:create")),
 ):
     if zip_file_id:
         zip_fp = (await db.execute(select(Fingerprint).where(Fingerprint.id == zip_file_id))).scalar_one_or_none()
         if not zip_fp:
             raise HTTPException(400, "文件不存在")
+        if not filename:
+            filename = "download.zip"
     elif file and file.filename:
-        if not file.filename.endswith(".zip"):
-            raise HTTPException(400, "仅支持 ZIP 文件")
+        validate_file_size(file)
         zip_data = await file.read()
+        validate_zip(zip_data)
         zip_fp = await store(db, zip_data, file.filename or "task.zip", file.content_type or "application/zip")
+        if not filename:
+            filename = file.filename or "task.zip"
     else:
         raise HTTPException(400, "请上传 ZIP 文件")
 
     cover_fp = None
     if cover and cover.filename:
+        validate_file_size(cover)
         cover_data = await cover.read()
+        validate_image(cover_data)
         cover_fp = await store(db, cover_data, cover.filename, cover.content_type or "image/png")
 
     task = Task(
         title=title, description=description, author_id=user.id,
         category=category, tags=tags, version=version,
+        filename=filename,
         fingerprint_id=zip_fp.id, file_size=zip_fp.size or 0,
         cover_fingerprint_id=cover_fp.id if cover_fp else None, status="approved",
     )

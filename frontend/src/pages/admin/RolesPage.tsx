@@ -1,5 +1,5 @@
-import { useEffect, useState, type FC } from "react";
-import { Table, Button, Modal, Checkbox, Input, message, Tag, Popconfirm, Space } from "antd";
+import { useEffect, useMemo, useState, type FC } from "react";
+import { Table, Button, Modal, Checkbox, Input, message, Tag, Popconfirm, Space, Collapse } from "antd";
 import { PlusOutlined, SettingOutlined, DeleteOutlined } from "@ant-design/icons";
 import { adminApi, type RoleItem, type PermItem } from "../../api/admin";
 import { useAuthStore } from "../../store/auth";
@@ -73,6 +73,30 @@ const RolesPage: FC = () => {
 
   const hasWildcard = (role: RoleItem) => role.permissions.some((p) => p.code === "*");
 
+  // 按前缀分组权限（admin / user / role / perm / version / task / forum / route / comment）
+  const permGroups = useMemo(() => {
+    const groups: Record<string, PermItem[]> = {};
+    const filtered = allPerms.filter((p) => p.code !== "*");
+    for (const p of filtered) {
+      const prefix = p.code.split(":")[0];
+      if (!groups[prefix]) groups[prefix] = [];
+      groups[prefix].push(p);
+    }
+    return Object.entries(groups).sort(([a], [b]) => a.localeCompare(b));
+  }, [allPerms]);
+
+  const groupLabels: Record<string, string> = {
+    admin: "管理后台",
+    user: "用户管理",
+    role: "角色管理",
+    perm: "权限管理",
+    version: "版本管理",
+    task: "任务管理",
+    forum: "论坛",
+    route: "路由管理",
+    comment: "评论管理",
+  };
+
   return (
     <div>
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 24 }}>
@@ -133,9 +157,9 @@ const RolesPage: FC = () => {
         onOk={savePerms}
         okText="保存"
         cancelText="取消"
-        width={420}
+        width={520}
       >
-        <div style={{ padding: "12px 0" }}>
+        <div style={{ padding: "12px 0", maxHeight: "60vh", overflowY: "auto" }}>
           <Checkbox
             checked={selectedIds.includes(allPerms.find((p) => p.code === "*")?.id ?? -1)}
             onChange={(e) => {
@@ -149,21 +173,62 @@ const RolesPage: FC = () => {
             超级管理员（全部权限）
           </Checkbox>
 
-          <div style={{ borderTop: "1px solid #f0f0f0", paddingTop: 16 }}>
-            <div style={{ fontSize: 12, color: "#b8afa6", marginBottom: 8 }}>选择具体权限：</div>
-            <Checkbox.Group
-              value={selectedIds.includes(allPerms.find((p) => p.code === "*")?.id ?? -1) ? [] : selectedIds}
-              onChange={(values) => setSelectedIds(values as number[])}
-              style={{ display: "flex", flexDirection: "column", gap: 8 }}
-            >
-              {allPerms.filter((p) => p.code !== "*").map((p) => (
-                <Checkbox key={p.id} value={p.id}>
-                  <span style={{ fontSize: 13 }}>{p.name}</span>
-                  <span style={{ fontSize: 10, color: "#b8afa6", marginLeft: 4 }}>{p.code}</span>
-                </Checkbox>
-              ))}
-            </Checkbox.Group>
-          </div>
+          {!selectedIds.includes(allPerms.find((p) => p.code === "*")?.id ?? -1) && (
+            <Collapse
+              size="small"
+              defaultActiveKey={permGroups.map(([key]) => key)}
+              items={permGroups.map(([prefix, perms]) => {
+                const groupIds = perms.map((p) => p.id);
+                const allChecked = groupIds.every((id) => selectedIds.includes(id));
+                const someChecked = groupIds.some((id) => selectedIds.includes(id));
+                return {
+                  key: prefix,
+                  label: (
+                    <span style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                      <span style={{ fontSize: 13, fontWeight: 500 }}>{groupLabels[prefix] || prefix}</span>
+                      <Tag style={{ fontSize: 10 }}>{perms.length}</Tag>
+                    </span>
+                  ),
+                  extra: (
+                    <Checkbox
+                      checked={allChecked}
+                      indeterminate={!allChecked && someChecked}
+                      onChange={(e) => {
+                        if (e.target.checked) {
+                          setSelectedIds((prev) => [...new Set([...prev, ...groupIds])]);
+                        } else {
+                          setSelectedIds((prev) => prev.filter((id) => !groupIds.includes(id)));
+                        }
+                      }}
+                      onClick={(e) => e.stopPropagation()}
+                    >
+                      全选
+                    </Checkbox>
+                  ),
+                  children: (
+                    <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+                      {perms.map((p) => (
+                        <Checkbox
+                          key={p.id}
+                          checked={selectedIds.includes(p.id)}
+                          onChange={(e) => {
+                            if (e.target.checked) {
+                              setSelectedIds((prev) => [...prev, p.id]);
+                            } else {
+                              setSelectedIds((prev) => prev.filter((id) => id !== p.id));
+                            }
+                          }}
+                        >
+                          <span style={{ fontSize: 13 }}>{p.name}</span>
+                          <span style={{ fontSize: 10, color: "#b8afa6", marginLeft: 4 }}>{p.code}</span>
+                        </Checkbox>
+                      ))}
+                    </div>
+                  ),
+                };
+              })}
+            />
+          )}
         </div>
       </Modal>
 
