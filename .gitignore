@@ -1,4 +1,5 @@
 # Environment
+credentials.ini
 .env
 .env.dev
 .env.prod
