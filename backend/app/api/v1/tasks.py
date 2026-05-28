@@ -205,8 +205,10 @@ async def download_task(task_id: int, db: AsyncSession = Depends(get_db), user: 
     if not download_name.endswith(".zip"):
         download_name += ".zip"
     encoded = quote(download_name)
-    return StreamingResponse(gen, media_type=ct,
-        headers={"Content-Disposition": f"attachment; filename*=UTF-8''{encoded}"})
+    headers = {"Content-Disposition": f"attachment; filename*=UTF-8''{encoded}"}
+    if length:
+        headers["Content-Length"] = str(length)
+    return StreamingResponse(gen, media_type=ct, headers=headers)
 
 
 # ── Delete ──

@@ -1,4 +1,5 @@
 import axios from "axios";
+import { DOWNLOAD_HOST } from "./config";
 
 const API = axios.create({ baseURL: "/api/v1" });
 
@@ -51,7 +52,7 @@ export const taskApi = {
   get: (id: number) =>
     API.get<{ code: number; data: TaskItem }>(`/tasks/${id}`).then((r) => r.data.data),
 
-  download: (id: number) => `/api/v1/tasks/${id}/download`,
+  download: (id: number) => `${DOWNLOAD_HOST}/api/v1/tasks/${id}/download`,
 
   like: (id: number) =>
     API.post<{ code: number; data: { liked: boolean; like_count: number } }>(`/tasks/${id}/like`).then((r) => r.data.data),

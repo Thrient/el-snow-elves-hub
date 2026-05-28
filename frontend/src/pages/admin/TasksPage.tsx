@@ -2,27 +2,7 @@ import { useEffect, useState, type FC } from "react";
 import { Table, Button, Select, message, Popconfirm, Tag, Modal, Descriptions, Space } from "antd";
 import { DeleteOutlined, EyeOutlined } from "@ant-design/icons";
 import { useAuthStore } from "../../store/auth";
-import axios from "axios";
-
-const API = axios.create({ baseURL: "/api/v1" });
-API.interceptors.request.use((config) => {
-  const token = localStorage.getItem("token");
-  if (token) config.headers.Authorization = `Bearer ${token}`;
-  return config;
-});
-
-interface AdminTask {
-  id: number;
-  title: string;
-  author_id: number;
-  category: string;
-  version: string;
-  status: string;
-  download_count: number;
-  like_count: number;
-  file_size: number | null;
-  created_at: string;
-}
+import { adminApi, type AdminTask } from "../../api/admin";
 
 const STATUS_MAP: Record<string, { color: string; label: string }> = {
   approved: { color: "green", label: "已上架" },
@@ -39,19 +19,19 @@ const TasksPage: FC = () => {
   const canDelete = hasPerm("task:delete");
 
   const load = () =>
-    API.get("/admin/tasks").then((r) => setTasks(r.data));
+    adminApi.listTasks().then(setTasks);
 
   useEffect(() => { load(); }, []);
 
   const changeStatus = async (id: number, status: string) => {
     setLoading(true);
-    try { await API.put(`/admin/tasks/${id}/status`, { status }); message.success("状态已更新"); load(); }
+    try { await adminApi.updateTaskStatus(id, status); message.success("状态已更新"); load(); }
     catch { message.error("操作失败"); }
     finally { setLoading(false); }
   };
 
   const remove = async (id: number) => {
-    try { await API.delete(`/admin/tasks/${id}`); message.success("已删除"); load(); }
+    try { await adminApi.deleteTask(id); message.success("已删除"); load(); }
     catch { message.error("删除失败"); }
   };
 

@@ -150,9 +150,18 @@ async def download_version_zip(version_id: int, _=Depends(require_perm_any("vers
         if not rows:
             raise HTTPException(404, "版本无文件")
 
+        # 预计算 Content-Length（ZIP_STORED）
+        content_length = 0
+        for vf, fp in rows:
+            name_bytes = vf.relative_path.encode("utf-8")
+            content_length += fp.size
+            content_length += 30 + len(name_bytes)
+            content_length += 46 + len(name_bytes)
+        content_length += 22
+
         def generate_zip():
             buffer = io.BytesIO()
-            with zipfile.ZipFile(buffer, 'w', zipfile.ZIP_DEFLATED) as zf:
+            with zipfile.ZipFile(buffer, 'w', zipfile.ZIP_STORED) as zf:
                 for vf, fp in rows:
                     gen, ct, length = stream_file(fp.sha256)
                     content = b''.join(gen)
@@ -170,5 +179,6 @@ async def download_version_zip(version_id: int, _=Depends(require_perm_any("vers
             media_type="application/zip",
             headers={
                 "Content-Disposition": f'attachment; filename="{filename}"; filename*=UTF-8\'\'{filename}',
+                "Content-Length": str(content_length),
             },
         )

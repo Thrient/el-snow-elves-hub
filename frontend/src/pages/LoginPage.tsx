@@ -3,7 +3,7 @@ import { useNavigate } from "react-router-dom";
 import { Button, Input, message } from "antd";
 import { UserOutlined, MailOutlined, LockOutlined } from "@ant-design/icons";
 import { useAuthStore } from "../store/auth";
-import axios from "axios";
+import { isAxiosError } from "../api/utils";
 
 type Mode = "login" | "register";
 
@@ -39,7 +39,7 @@ const LoginPage: FC = () => {
       message.success(mode === "login" ? "登录成功" : "注册成功");
       navigate("/");
     } catch (err: unknown) {
-      const msg = axios.isAxiosError(err) ? err.response?.data?.detail : "请求失败";
+      const msg = isAxiosError(err) ? err.response?.data?.detail : "请求失败";
       message.error(msg || "请求失败");
     }
   };

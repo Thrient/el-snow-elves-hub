@@ -1,20 +1,15 @@
 import { useEffect, useState, type FC } from "react";
 import { Card, Typography, Button, Space, Tag } from "antd";
 import { DownloadOutlined } from "@ant-design/icons";
-import axios from "axios";
+import { versionsApi, type VersionItem } from "../api/versions";
 
 const { Title, Paragraph } = Typography;
 
-interface Version {
-  id: number; version: string; platform: string; changelog: string | null;
-  is_latest: boolean; is_mandatory: boolean; file_count: number; created_at: string;
-}
-
 const DownloadPage: FC = () => {
-  const [versions, setVersions] = useState<Version[]>([]);
+  const [versions, setVersions] = useState<VersionItem[]>([]);
 
   useEffect(() => {
-    axios.get("/api/v1/versions").then((r) => setVersions(r.data.data));
+    versionsApi.list().then(setVersions);
   }, []);
 
   const latest = versions.find((v) => v.is_latest);
@@ -24,7 +19,6 @@ const DownloadPage: FC = () => {
       <Title level={2} style={{ color: "#3d3630" }}>下载</Title>
       <Paragraph style={{ color: "#6b5e55" }}>下载桌面客户端，开始使用自动化工具</Paragraph>
 
-      {/* Latest version hero */}
       {latest && (
         <Card
           style={{ borderRadius: 12, marginBottom: 24, border: "1px solid #d4513b33", background: "linear-gradient(135deg, #fffbf5, #fff)" }}
@@ -40,7 +34,7 @@ const DownloadPage: FC = () => {
                 <div style={{ fontSize: 13, color: "#b8afa6", marginTop: 8, maxWidth: 500 }}>{latest.changelog}</div>
               )}
             </div>
-            <a href={`/api/v1/versions/${latest.id}/download`} target="_blank" rel="noreferrer">
+            <a href={versionsApi.download(latest.id)} target="_blank" rel="noreferrer">
               <Button type="primary" size="large" icon={<DownloadOutlined />} style={{ borderRadius: 8 }}>
                 立即下载
               </Button>
@@ -49,7 +43,6 @@ const DownloadPage: FC = () => {
         </Card>
       )}
 
-      {/* Version history */}
       {versions.length > 0 && (
         <>
           <Title level={4} style={{ color: "#3d3630", marginBottom: 16 }}>历史版本</Title>
@@ -67,7 +60,7 @@ const DownloadPage: FC = () => {
                       {new Date(ver.created_at).toLocaleDateString("zh-CN")}
                     </div>
                   </div>
-                  <a href={`/api/v1/versions/${ver.id}/download`} target="_blank" rel="noreferrer">
+                  <a href={versionsApi.download(ver.id)} target="_blank" rel="noreferrer">
                     <Button icon={<DownloadOutlined />} style={{ borderRadius: 8 }}>下载</Button>
                   </a>
                 </div>

@@ -4,11 +4,10 @@ import { Card, Typography, Tabs, Input, Button, List, message, Upload, Row, Col,
 import { UserOutlined, DownloadOutlined, LikeOutlined, FileOutlined, CameraOutlined, CommentOutlined, AppstoreOutlined } from "@ant-design/icons";
 import { useAuthStore } from "../store/auth";
 import { taskApi, type TaskItem } from "../api/tasks";
-import axios from "axios";
+import { usersApi, type UserDownload, type UserLike } from "../api/users";
+import { authApi } from "../api/auth";
 
 const { Title } = Typography;
-const API = axios.create({ baseURL: "/api/v1" });
-API.interceptors.request.use((c) => { const t = localStorage.getItem("token"); if (t) c.headers.Authorization = `Bearer ${t}`; return c; });
 
 const ProfilePage: FC = () => {
   const navigate = useNavigate();
@@ -16,17 +15,17 @@ const ProfilePage: FC = () => {
   const [editing, setEditing] = useState(false);
   const [username, setUsername] = useState(user?.username || "");
   const [avatarUrl, setAvatarUrl] = useState<string | null>(null);
-  const [downloads, setDownloads] = useState<{ task_id: number; task_title: string; downloaded_at: string }[]>([]);
-  const [likes, setLikes] = useState<{ task_id: number; task_title: string; created_at: string }[]>([]);
+  const [downloads, setDownloads] = useState<UserDownload[]>([]);
+  const [likes, setLikes] = useState<UserLike[]>([]);
 
   useEffect(() => {
-    API.get("/users/me/downloads").then((r) => setDownloads(r.data.data));
-    API.get("/users/me/likes").then((r) => setLikes(r.data.data));
+    usersApi.getDownloads().then(setDownloads);
+    usersApi.getLikes().then(setLikes);
   }, []);
 
   const save = async () => {
     try {
-      await axios.put("/api/v1/auth/me", { username }, { headers: { Authorization: `Bearer ${localStorage.getItem("token")}` } });
+      await authApi.updateProfile(username);
       useAuthStore.getState().loadFromStorage();
       setEditing(false);
       message.success("已保存");
@@ -47,7 +46,7 @@ const ProfilePage: FC = () => {
             customRequest={async ({ file }) => {
               const fd = new FormData();
               fd.append("file", file as File);
-              const res = await API.post("/users/me/avatar", fd);
+              const res = await usersApi.uploadAvatar(file as File);
               if (res.data.code === 0) {
                 setAvatarUrl(res.data.data.avatar_url);
                 message.success("头像已更新");
