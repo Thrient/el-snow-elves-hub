@@ -13,21 +13,7 @@ const RouteGuard: FC<RouteGuardProps> = ({ perm, children }) => {
   const user = useAuthStore((s) => s.user);
   const hasPerm = useAuthStore((s) => s.hasPerm);
 
-  if (!user) {
-    return (
-      <Result
-        status="403"
-        title="请先登录"
-        extra={
-          <Button type="primary" onClick={() => navigate("/login")}>
-            去登录
-          </Button>
-        }
-      />
-    );
-  }
-
-  if (!hasPerm(perm)) {
+  if (user && !hasPerm(perm)) {
     return (
       <Result
         status="403"

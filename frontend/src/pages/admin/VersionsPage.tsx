@@ -92,6 +92,7 @@ const VersionsPage: FC = () => {
     try {
       // Step 1: Check which blobs already exist
       setUploadStage("checking");
+      setUploadProgress({ done: 0, total: 0 });
       const { missing } = await adminApi.checkBlobs(shaList);
 
       // Step 2: Upload only missing blobs
@@ -104,9 +105,9 @@ const VersionsPage: FC = () => {
         for (const [, { sha256, file }] of entries) {
           if (missingSet.has(sha256)) {
             await adminApi.uploadBlob(file);
+            uploaded++;
+            setUploadProgress({ done: uploaded, total: missing.length });
           }
-          uploaded++;
-          setUploadProgress({ done: uploaded, total: missing.length });
         }
       }
 

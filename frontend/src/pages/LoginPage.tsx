@@ -75,7 +75,7 @@ const LoginPage: FC = () => {
             </div>
 
             <p style={styles.tagline}>
-              一梦江湖自动化脚本社区<br />
+              游戏自动化脚本社区<br />
               创作、分享、解放双手
             </p>
 

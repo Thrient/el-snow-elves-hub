@@ -1,6 +1,6 @@
 import { type ComponentType } from "react";
 
-import HomePage from "./pages/HomePage";
+import HomePage from "@/pages/home";
 import DownloadPage from "./pages/DownloadPage";
 import ForumPage from "./pages/ForumPage";
 import ForumBoardPage from "./pages/ForumBoardPage";
