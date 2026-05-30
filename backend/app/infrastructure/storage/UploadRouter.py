@@ -21,7 +21,7 @@ async def init_upload(
     db: AsyncSession = Depends(get_db),
     _=Depends(require_perm_any("file:upload")),
 ):
-    upload = await chunked_upload.init(db, body.filename, body.total_size, body.total_chunks)
+    upload = await chunked_upload.init(db, body.filename, body.total_size, body.total_chunks, user.id)
     return ok({"upload_id": upload.upload_id, "expires_at": upload.expires_at.isoformat()})
 
 

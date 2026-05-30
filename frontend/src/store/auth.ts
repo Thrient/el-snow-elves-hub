@@ -1,7 +1,7 @@
 import { create } from "zustand";
 import axios from "axios";
 
-const API = axios.create({ baseURL: "/api/v1" });
+const API = axios.create();
 
 export interface AuthUser {
   id: number;
@@ -49,7 +49,7 @@ export const useAuthStore = create<AuthState>((set, get) => ({
   login: async (email, password) => {
     set({ loading: true });
     try {
-      const { data } = await API.post("/auth/login", { email, password });
+      const { data } = await API.post("/api/v1/auth/login", { email, password });
       localStorage.setItem("token", data.access_token);
       localStorage.setItem("refresh_token", data.refresh_token);
       localStorage.setItem("user", JSON.stringify(data.user));
@@ -63,7 +63,7 @@ export const useAuthStore = create<AuthState>((set, get) => ({
   register: async (username, email, password) => {
     set({ loading: true });
     try {
-      const { data } = await API.post("/auth/register", { username, email, password });
+      const { data } = await API.post("/api/v1/auth/register", { username, email, password });
       localStorage.setItem("token", data.access_token);
       localStorage.setItem("refresh_token", data.refresh_token);
       localStorage.setItem("user", JSON.stringify(data.user));

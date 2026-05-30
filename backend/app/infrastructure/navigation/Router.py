@@ -65,10 +65,15 @@ async def get_routes(
         else:
             roots.append(node)
 
-    # 剪掉菜单中无子节点的父路由（如 /admin 对无权限用户不可见）
+    # 剪枝：菜单中无可见子节点且自身无权限的父路由隐藏
     def prune(node: RoutePublic) -> bool:
         node.children = [c for c in node.children if prune(c)]
-        return node.in_menu is False or len(node.children) > 0 or node.component is not None
+        if not node.in_menu:
+            return True  # 非菜单路由始终保留（路由匹配用）
+        if len(node.children) > 0:
+            return True  # 有可见子节点，保留
+        # 叶子菜单节点：perm 为 null 则隐藏，有 perm 则保留（RouteGuard 负责拦截）
+        return node.perm is not None
 
     roots = [r for r in roots if prune(r)]
     return roots

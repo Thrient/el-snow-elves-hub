@@ -1,5 +1,6 @@
 import { create } from "zustand";
-import { routesApi, type RoutePublic } from "../api/routes";
+import { navigationApi } from "@/api/navigation";
+import type { RoutePublic } from "@/types";
 
 interface RoutesState {
   routes: RoutePublic[];
@@ -17,7 +18,7 @@ export const useRoutesStore = create<RoutesState>((set, get) => ({
   fetchRoutes: async () => {
     set({ loading: true, error: null });
     try {
-      const routes = await routesApi.getRoutes();
+      const routes = await navigationApi.getRoutes();
       set({ routes, loading: false });
     } catch {
       set({ error: "加载路由失败", loading: false });

@@ -2,10 +2,12 @@
 import asyncio
 
 from app.infrastructure.Database import engine, async_session, Base
+from sqlalchemy import select, func
 from app.infrastructure.rbac.entity.Role import Role
 from app.infrastructure.rbac.entity.Permission import Permission
 from app.infrastructure.rbac.entity.RolePermission import RolePermission
 from app.infrastructure.navigation.entity.Route import Route as RouteModel
+from app.forum.entity.ForumBoard import ForumBoard
 from app.identity.entity.User import User
 from app.infrastructure.rbac.entity.UserRole import UserRole
 from app.infrastructure.security.Token import hash_password
@@ -195,6 +197,18 @@ async def seed():
             await db.commit()
             print("管理员角色已补全")
 
+        # ── Forum boards ──
+        for name, desc in [("综合讨论", "游戏相关自由讨论，畅所欲言"), ("问题反馈", "使用问题、Bug 反馈与功能建议")]:
+            exists = (await db.execute(
+                select(ForumBoard).where(ForumBoard.name == name)
+            )).scalar_one_or_none()
+            if not exists:
+                db.add(ForumBoard(name=name, description=desc))
+                await db.commit()
+                print(f"板块已创建: {name}")
+            else:
+                print(f"板块已存在: {name}")
+
         # ── Routes ──
         route_count = (await db.execute(
             select(func.count(RouteModel.id))
@@ -209,10 +223,17 @@ async def seed():
                 RouteModel(path="/forum", title="论坛", icon="MessageOutlined", perm="page:forum", in_menu=True, sort_order=40, component="ForumPage"),
                 RouteModel(path="/upload", title="上传", perm="page:upload", in_menu=False, sort_order=70, component="UploadPage"),
                 RouteModel(path="/profile", title="个人中心", perm="page:profile", in_menu=False, sort_order=80, component="ProfilePage"),
-                RouteModel(path="/user/:id", title="用户主页", perm="page:user", in_menu=False, sort_order=60, component="AuthorPage"),
+                RouteModel(path="/user/:userId", title="用户主页", perm="page:user", in_menu=False, sort_order=60, component="AuthorPage"),
                 RouteModel(path="/notifications", title="通知", perm="page:notification", in_menu=False, sort_order=100, component="NotificationsPage"),
                 RouteModel(path="/login", title="登录", perm="page:login", in_menu=False, sort_order=90, component="LoginPage"),
                 RouteModel(path="/admin", title="管理", icon="SettingOutlined", in_menu=True, sort_order=110, component="AdminLayout"),
+                # Non-menu sub-routes
+                RouteModel(path="/market/:taskId", title="任务详情", perm="page:market", in_menu=False, sort_order=0, component="TaskDetailPage"),
+                RouteModel(path="/ranking", title="排行榜", perm="page:market", in_menu=False, sort_order=0, component="RankingPage"),
+                RouteModel(path="/forum/:boardId", title="板块详情", perm="page:forum", in_menu=False, sort_order=0, component="ForumBoardPage"),
+                RouteModel(path="/forum/post/:threadId", title="帖子详情", perm="page:forum", in_menu=False, sort_order=0, component="ForumThreadPage"),
+                RouteModel(path="/forum/create", title="发帖", perm="page:forum", in_menu=False, sort_order=0, component="ForumCreatePage"),
+                RouteModel(path="/forum/search", title="搜索", perm="page:forum", in_menu=False, sort_order=0, component="ForumSearchPage"),
             ])
             await db.flush()
 

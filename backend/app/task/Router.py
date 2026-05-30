@@ -330,11 +330,17 @@ async def create_task(
 ):
     file_record = None
     if zip_file_id:
-        file_record = (await db.execute(
-            select(FileRecord).where(FileRecord.id == zip_file_id)
+        # zip_file_id is fingerprint_id — look up fingerprint, create FileRecord
+        fp = (await db.execute(
+            select(Fingerprint).where(Fingerprint.id == zip_file_id)
         )).scalar_one_or_none()
-        if not file_record:
-            raise HTTPException(400, "文件不存在")
+        if not fp:
+            raise HTTPException(400, "文件指纹不存在")
+        file_record = await storage_service.create_record(
+            db, fp, filename=filename or "task.zip",
+            content_type="application/zip", uploaded_by=user.id,
+        )
+        await db.flush()
     elif file and file.filename:
         validate_file_size(file)
         zip_data = await file.read()

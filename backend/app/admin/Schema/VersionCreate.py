@@ -4,7 +4,7 @@ from pydantic import BaseModel
 
 class FileEntry(BaseModel):
     path: str
-    file_record_id: int
+    sha256: str
 
 
 class VersionCreate(BaseModel):

@@ -13,9 +13,10 @@ from app.infrastructure.storage.StorageService import storage_service
 class ChunkedUpload:
     """管理分块上传的完整生命周期"""
 
-    async def init(self, db: AsyncSession, filename: str, total_size: int, total_chunks: int) -> Upload:
+    async def init(self, db: AsyncSession, filename: str, total_size: int, total_chunks: int, uploaded_by: int | None = None) -> Upload:
         upload = Upload(
             filename=filename, total_size=total_size, total_chunks=total_chunks,
+            uploaded_by=uploaded_by,
         )
         db.add(upload)
         await db.commit()

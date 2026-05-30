@@ -269,9 +269,7 @@ async def upload_blob(
     async with async_session() as db:
         fp = await storage_service.store(db, data)
         await db.commit()
-        return BlobUploadResponse(
-            fingerprint_id=fp.id, sha256=fp.sha256, size=fp.size
-        )
+        return {"fingerprint_id": fp.id, "sha256": fp.sha256, "size": fp.size}
 
 # ═══════════════════════════════════════════
 # Versions
@@ -300,9 +298,8 @@ async def list_versions(db: AsyncSession = Depends(get_db)):
     return items
 
 
-@router.post("/versions", status_code=status.HTTP_201_CREATED,
-             dependencies=[Depends(require_perm("version:create"))])
-async def create_version(body: VersionCreate, db: AsyncSession = Depends(get_db)):
+@router.post("/versions", status_code=status.HTTP_201_CREATED)
+async def create_version(body: VersionCreate, user: User = Depends(require_perm("version:create")), db: AsyncSession = Depends(get_db)):
     if body.is_latest:
         await db.execute(
             update(DownloadVersion)
@@ -316,11 +313,20 @@ async def create_version(body: VersionCreate, db: AsyncSession = Depends(get_db)
     await db.flush()
 
     for f_entry in body.files:
+        fp = (await db.execute(
+            select(Fingerprint).where(Fingerprint.sha256 == f_entry.sha256)
+        )).scalar_one_or_none()
+        if not fp:
+            raise HTTPException(400, f"blob not found: {f_entry.sha256}")
         record = (await db.execute(
-            select(FileRecord).where(FileRecord.id == f_entry.file_record_id)
+            select(FileRecord).where(FileRecord.fingerprint_id == fp.id)
         )).scalar_one_or_none()
         if not record:
-            raise HTTPException(400, f"file_record not found: {f_entry.file_record_id}")
+            record = await storage_service.create_record(
+                db, fp, filename=f_entry.path.split('/').pop() or "blob",
+                content_type="application/octet-stream", uploaded_by=user.id,
+            )
+            await db.flush()
         db.add(VersionFile(
             version_id=v.id,
             relative_path=f_entry.path,

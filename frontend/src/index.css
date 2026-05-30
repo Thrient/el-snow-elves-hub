@@ -1,0 +1,24 @@
+/* ── Fluid root font-size: scales with viewport ── */
+/* 1366px→16px | 1920px→19.2px | 2560px→20px(capped) */
+html {
+  font-size: clamp(16px, 1vw, 20px);
+}
+
+html, body {
+  margin: 0;
+  padding: 0;
+  background: #faf7f1;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+#root {
+  min-height: 100vh;
+}
+
+/* ── Hidden scrollbar, still scrollable ── */
+::-webkit-scrollbar { display: none; }
+
+@-moz-document url-prefix() {
+  * { scrollbar-width: none; }
+}

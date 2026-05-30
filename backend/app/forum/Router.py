@@ -61,8 +61,18 @@ def _thread_out(p: ForumPost) -> ThreadOut:
 
 @router.get("/boards")
 async def list_boards(db: AsyncSession = Depends(get_db)):
-    result = await db.execute(select(ForumBoard).order_by(ForumBoard.sort_order))
-    return ok([BoardOut.model_validate(b) for b in result.scalars().all()])
+    stmt = (
+        select(ForumBoard, func.count(ForumPost.id).label("thread_count"))
+        .outerjoin(ForumPost, ForumPost.board_id == ForumBoard.id)
+        .group_by(ForumBoard.id)
+        .order_by(ForumBoard.sort_order)
+    )
+    rows = (await db.execute(stmt)).all()
+    return ok([
+        BoardOut(id=b.id, name=b.name, description=b.description,
+                 thread_count=tc, created_at=b.created_at)
+        for b, tc in rows
+    ])
 
 
 # ── Search ──
