@@ -114,6 +114,7 @@ ROLES = [
     {"name": "admin", "description": "超级管理员", "data_scope": "all"},
     {"name": "user", "description": "普通用户", "data_scope": "self"},
     {"name": "anonymous", "description": "匿名用户（未登录时的默认权限）", "data_scope": "self"},
+    {"name": "ai-reviewer", "description": "AI 内容审核员", "data_scope": "all"},
 ]
 
 
@@ -218,6 +219,24 @@ async def seed():
                 print(f"user ← {code}")
         await db.commit()
 
+        # ── AI reviewer role ──
+        ai_reviewer_role = (await db.execute(
+            select(Role).where(Role.name == "ai-reviewer")
+        )).scalar_one()
+        for code in ["forum:review:list", "forum:review", "forum:boards", "forum:search",
+                     "forum:threads", "forum:view", "task:list", "task:view", "task:comments"]:
+            p = (await db.execute(select(Permission).where(Permission.code == code))).scalar_one()
+            existing = (await db.execute(
+                select(RolePermission).where(
+                    RolePermission.role_id == ai_reviewer_role.id,
+                    RolePermission.permission_id == p.id,
+                )
+            )).scalar_one_or_none()
+            if not existing:
+                db.add(RolePermission(role_id=ai_reviewer_role.id, permission_id=p.id))
+                print(f"ai-reviewer ← {code}")
+        await db.commit()
+
         # ── Admin user ──
         admin_user = (await db.execute(
             select(User).where(User.email == "thrient@petalmail.com")
@@ -245,6 +264,33 @@ async def seed():
             db.add(UserRole(user_id=admin_user.id, role_id=admin_role.id))
             await db.commit()
             print("管理员角色已补全")
+
+        # ── AI reviewer user ──
+        ai_user = (await db.execute(
+            select(User).where(User.email == "ai-reviewer@elarion.cn")
+        )).scalar_one_or_none()
+        if not ai_user:
+            ai_user = User(
+                username="AI审核员",
+                email="ai-reviewer@elarion.cn",
+                password_hash=hash_password("AiReview2024!@#"),
+            )
+            db.add(ai_user)
+            await db.flush()
+            db.add(UserRole(user_id=ai_user.id, role_id=ai_reviewer_role.id))
+            await db.commit()
+            print("AI 审核员已创建")
+        else:
+            print("AI 审核员已存在，检查角色")
+        if not (await db.execute(
+            select(UserRole).where(
+                UserRole.user_id == ai_user.id,
+                UserRole.role_id == ai_reviewer_role.id,
+            )
+        )).scalar_one_or_none():
+            db.add(UserRole(user_id=ai_user.id, role_id=ai_reviewer_role.id))
+            await db.commit()
+            print("AI 审核员角色已补全")
 
         # ── Forum boards ──
         for name, desc in [("综合讨论", "游戏相关自由讨论，畅所欲言"), ("问题反馈", "使用问题、Bug 反馈与功能建议")]:

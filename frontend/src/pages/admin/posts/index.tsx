@@ -32,7 +32,7 @@ const AdminPostsPage: FC = () => {
   };
 
   const remove = async (id: number) => {
-    try { await adminApi.reviewPost(id, { status: "rejected", reviewed: true }); message.success("已删除"); load(); }
+    try { await adminApi.deletePost(id); message.success("已删除"); load(); }
     catch { /* ErrorToast */ }
   };
 
@@ -67,9 +67,14 @@ const AdminPostsPage: FC = () => {
               <Space size={4}>
                 <Button size="small" type="text" icon={<EyeOutlined />} onClick={() => setDetail(record)} />
                 {record.reviewed ? (
-                  <Select size="small" value={record.status}
-                    onChange={(v) => review(record.id, v)}
-                    options={[{ value: "approved", label: "通过" }, { value: "rejected", label: "拒绝" }]} />
+                  <>
+                    <Select size="small" value={record.status}
+                      onChange={(v) => review(record.id, v)}
+                      options={[{ value: "approved", label: "通过" }, { value: "rejected", label: "拒绝" }]} />
+                    <Popconfirm title="确定删除?" onConfirm={() => remove(record.id)}>
+                      <Button size="small" type="text" danger icon={<DeleteOutlined />} />
+                    </Popconfirm>
+                  </>
                 ) : (
                   <>
                     <Button size="small" type="primary" onClick={() => review(record.id, "approved")}>通过</Button>

@@ -36,7 +36,7 @@ class MinioClient:
         cache_key = f"minio:url:{self._bucket}:{key}"
         cached = r.get(cache_key)
         if cached:
-            return cached.decode()
+            return cached if isinstance(cached, str) else cached.decode()
 
         url = self._client.generate_presigned_url(
             "get_object",

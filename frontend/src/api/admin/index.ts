@@ -64,6 +64,7 @@ export const adminApi = {
   },
   reviewPost: (id: number, data: { status?: string; reviewed?: boolean }) =>
     api.put(`/api/v1/admin/posts/${id}/review`, data),
+  deletePost: (id: number) => api.delete(`/api/v1/forum/threads/${id}`),
 
   // Routes
   listRoutes: () => api.get<RouteAdmin[]>("/api/v1/admin/routes"),

@@ -1,6 +1,5 @@
 """AI 内容审核 — Ollama 文字+视觉双审"""
 import json
-import logging
 
 import httpx
 from sqlalchemy import select
@@ -12,22 +11,15 @@ from app.task.entity.Comment import Comment
 from app.infrastructure.storage.StorageService import storage_service
 from app.infrastructure.storage.entity.FileRecord import FileRecord
 
-logger = logging.getLogger("scheduler.ai_review")
-
-OLLAMA_URL = "http://192.168.3.21:11434/api/chat"
+OLLAMA_URL = "http://ollama:11434/api/chat"
 MODEL = "minicpm-v:8b"
 
-REVIEW_PROMPT = """你是一个内容审核助手。请审查以下内容是否包含违规信息：
-- 色情、低俗内容
-- 暴力、恐怖内容
-- 政治敏感内容
-- 广告、垃圾信息
-- 人身攻击、辱骂
+REVIEW_PROMPT = """你是一个内容审核助手。审查以下内容是否违规（色情/暴力/政治敏感/广告/辱骂）。
+严格按此 JSON 格式回复，不要修改 key 名：
+{"pass": true, "reason": "简短说明"}
+pass=true 表示通过（无违规），pass=false 表示违规。
 
-回复 JSON: {"pass": true/false, "reason": "简短说明原因"}
-
-待审查内容：
-"""
+内容：\n"""
 
 
 async def ai_review_text(text: str, image_urls: list[str] | None = None) -> dict:
@@ -37,7 +29,7 @@ async def ai_review_text(text: str, image_urls: list[str] | None = None) -> dict
     # 图片 URL 转 base64 传给视觉模型
     if image_urls:
         images = []
-        async with httpx.AsyncClient(timeout=30) as cli:
+        async with httpx.AsyncClient(timeout=120) as cli:
             for url in image_urls:
                 try:
                     resp = await cli.get(url)
@@ -59,13 +51,21 @@ async def ai_review_text(text: str, image_urls: list[str] | None = None) -> dict
                 "messages": messages,
                 "stream": False,
                 "format": "json",
+                "keep_alive": "10m",
             })
             data = resp.json()
-            result = json.loads(data["message"]["content"])
-            return {"pass": result.get("pass", True), "reason": result.get("reason", "")}
+            raw = data["message"]["content"]
+            result = json.loads(raw)
+            passed = result.get("pass", result.get("action") == "pass")
+            return {"pass": passed, "reason": result.get("reason", "")}
     except Exception as e:
-        logger.warning(f"AI review failed: {e}")
-        return {"pass": True, "reason": ""}  # AI 不可用时放行，让人工审
+        raw_preview = ""
+        try:
+            raw_preview = data.get("message", {}).get("content", "")[:200]
+        except Exception:
+            pass
+        print(f"AI review failed: {e} | raw: {raw_preview}")
+        return {"pass": None, "reason": str(e)[:100]}
 
 
 async def _resolve_images(image_ids: list | None) -> list[str]:
@@ -80,7 +80,7 @@ async def _resolve_images(image_ids: list | None) -> list[str]:
 
 async def run_ai_review():
     """定时任务：审查所有未审核内容"""
-    logger.info("AI review: starting")
+    print("AI review: starting")
 
     async with async_session() as db:
         # ── 1. 帖子 ──
@@ -94,12 +94,15 @@ async def run_ai_review():
         for p in posts:
             images = await _resolve_images(p.image_ids)
             result = await ai_review_text(p.title or "" + "\n" + p.content, images)
-            if result["pass"]:
+            if result["pass"] is None:
+                continue  # AI 不可用，跳过
+            elif result["pass"]:
                 p.reviewed = True
+                print(f"AI passed post #{p.id}: {result['reason']}")
             else:
                 p.status = "rejected"
                 p.reviewed = True
-                logger.info(f"AI rejected post #{p.id}: {result['reason']}")
+                print(f"AI rejected post #{p.id}: {result['reason']}")
             await db.commit()
 
         # ── 2. 评论（回复）─
@@ -113,12 +116,15 @@ async def run_ai_review():
         for r in replies:
             images = await _resolve_images(r.image_ids)
             result = await ai_review_text(r.content, images)
-            if result["pass"]:
+            if result["pass"] is None:
+                continue
+            elif result["pass"]:
                 r.reviewed = True
+                print(f"AI passed reply #{r.id}")
             else:
                 r.status = "rejected"
                 r.reviewed = True
-                logger.info(f"AI rejected reply #{r.id}: {result['reason']}")
+                print(f"AI rejected reply #{r.id}: {result['reason']}")
             await db.commit()
 
         # ── 3. 任务 ──
@@ -130,11 +136,14 @@ async def run_ai_review():
             text = f"{t.title}\n{t.description or ''}"
             cover_urls = [storage_service.url(t.cover_record.fingerprint)] if t.cover_record else None
             result = await ai_review_text(text, cover_urls)
-            if result["pass"]:
+            if result["pass"] is None:
+                continue
+            elif result["pass"]:
                 t.reviewed = True
+                print(f"AI passed task #{t.id}")
             else:
                 t.reviewed = True
-                logger.info(f"AI reviewed task #{t.id}: {result['reason']}")
+                print(f"AI reviewed task #{t.id}: {result['reason']}")
             await db.commit()
 
         # ── 4. 任务评论 ──
@@ -144,12 +153,15 @@ async def run_ai_review():
 
         for c in task_comments:
             result = await ai_review_text(c.content)
-            if result["pass"]:
+            if result["pass"] is None:
+                continue
+            elif result["pass"]:
                 c.reviewed = True
+                print(f"AI passed task comment #{c.id}")
             else:
                 c.status = "rejected"
                 c.reviewed = True
-                logger.info(f"AI rejected comment #{c.id}: {result['reason']}")
+                print(f"AI rejected task comment #{c.id}: {result['reason']}")
             await db.commit()
 
-    logger.info("AI review: done")
+    print("AI review: done")
