@@ -16,7 +16,7 @@ from app.task.entity.Comment import Comment
 from app.identity.entity.User import User
 
 AI_EMAIL = "ai-reviewer@elarion.cn"
-OLLAMA_URL = "http://ollama:11434/api/chat"
+OLLAMA_URL = "http://ollama:11434/api/generate"
 MODEL = "minicpm-v:8b"
 API_BASE = "http://localhost:8000/api/v1"
 
@@ -40,7 +40,7 @@ async def _get_ai_token() -> str:
 
 async def ai_review_text(text: str, image_urls: list[str] | None = None) -> dict:
     """调 Ollama 审查，返回 {"pass": bool|None, "reason": str}"""
-    messages = [{"role": "user", "content": REVIEW_PROMPT + text}]
+    prompt = REVIEW_PROMPT + text
 
     image_b64s: list[str] = []
     if image_urls:
@@ -64,7 +64,7 @@ async def ai_review_text(text: str, image_urls: list[str] | None = None) -> dict
     for attempt in range(3):
         try:
             body: dict = {
-                "model": MODEL, "messages": messages,
+                "model": MODEL, "prompt": prompt,
                 "stream": False, "format": "json", "keep_alive": "10m",
             }
             if image_b64s:
@@ -72,7 +72,7 @@ async def ai_review_text(text: str, image_urls: list[str] | None = None) -> dict
             async with httpx.AsyncClient(timeout=120) as cli:
                 resp = await cli.post(OLLAMA_URL, json=body)
                 data = resp.json()
-                raw = data["message"]["content"]
+                raw = data["response"]
                 result = json.loads(raw)
                 passed = result.get("pass", result.get("action") == "pass")
                 return {"pass": passed, "reason": result.get("reason", "")}
