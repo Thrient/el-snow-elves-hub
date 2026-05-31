@@ -16,6 +16,7 @@ from app.forum.entity.ForumLike import ForumLike
 from app.identity.entity.User import User
 from app.infrastructure.storage.StorageService import storage_service
 from app.notification.Router import create_notification
+from app.infrastructure.EventBus import publish_review
 
 router = APIRouter(prefix="/forum", tags=["论坛"])
 
@@ -203,8 +204,10 @@ async def create_thread(
     db.add(p)
     await db.commit()
     await db.refresh(p)
-    from app.infrastructure.EventBus import publish_review
-    await publish_review("post", p.id)
+    try:
+        await publish_review("post", p.id)
+    except Exception as e:
+        print(f"Failed to enqueue review for post #{p.id}: {e}")
     return ok({"id": p.id})
 
 
@@ -254,8 +257,10 @@ async def create_reply(
             f"{user.username} 在评论中提到了你",
             f"/forum/post/{thread_id}")
 
-    from app.infrastructure.EventBus import publish_review
-    await publish_review("reply", r.id)
+    try:
+        await publish_review("reply", r.id)
+    except Exception as e:
+        print(f"Failed to enqueue review for reply #{r.id}: {e}")
 
     return ok(ReplyOut(
         id=r.id, content=r.content, author=_author_out(user),

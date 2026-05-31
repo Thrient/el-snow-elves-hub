@@ -120,7 +120,7 @@ async def _handle_message(data: dict):
         images = await _resolve_images(image_ids)
         result = await ai_review_text(text, images)
         if result["pass"] is None:
-            return
+            raise RuntimeError(f"AI unavailable for {type_} #{item_id}")
         status = "approved" if result["pass"] else "rejected"
         print(f"AI {'passed' if result['pass'] else 'rejected'} {type_} #{item_id}: {result['reason']}")
         token = await _get_ai_token()
@@ -137,7 +137,7 @@ async def _handle_message(data: dict):
         images = await _resolve_images([t.cover_record_id] if t.cover_record_id else [])
         result = await ai_review_text(text, images)
         if result["pass"] is None:
-            return
+            raise RuntimeError(f"AI unavailable for {type_} #{item_id}")
         status = "approved" if result["pass"] else "rejected"
         print(f"AI {'passed' if result['pass'] else 'rejected'} task #{item_id}: {result['reason']}")
         token = await _get_ai_token()
@@ -153,7 +153,7 @@ async def _handle_message(data: dict):
             text = c.content
         result = await ai_review_text(text)
         if result["pass"] is None:
-            return
+            raise RuntimeError(f"AI unavailable for {type_} #{item_id}")
         status = "approved" if result["pass"] else "rejected"
         print(f"AI {'passed' if result['pass'] else 'rejected'} comment #{item_id}: {result['reason']}")
         token = await _get_ai_token()
@@ -161,8 +161,40 @@ async def _handle_message(data: dict):
             f"/admin/comments/{item_id}/review",
             {"status": status, "reviewed": True, "reason": result["reason"]}, token)
 
+    else:
+        print(f"AI review worker: unknown type '{type_}' id={item_id}, skipped")
+
+
+async def _catch_up_unreviewed():
+    """一次性扫描：把漏审的内容重新入队"""
+    from app.infrastructure.EventBus import publish_review
+    async with async_session() as db:
+        # 帖子 + 回复
+        posts = (await db.execute(
+            select(ForumPost).where(ForumPost.reviewed == False)
+        )).scalars().all()
+        for p in posts:
+            kind = "post" if p.thread_id is None else "reply"
+            await publish_review(kind, p.id)
+        # 任务
+        tasks = (await db.execute(
+            select(TaskModel).where(TaskModel.reviewed == False)
+        )).scalars().all()
+        for t in tasks:
+            await publish_review("task", t.id)
+        # 评论
+        comments = (await db.execute(
+            select(Comment).where(Comment.reviewed == False)
+        )).scalars().all()
+        for c in comments:
+            await publish_review("comment", c.id)
+    print(f"AI review catch-up: {len(posts)} posts, {len(tasks)} tasks, {len(comments)} comments")
+
 
 async def start_worker():
+    await asyncio.sleep(3)  # 等待 HTTP server 就绪
+    await _catch_up_unreviewed()  # 兜底扫描漏审内容
+
     # RabbitMQ 容器可能还在启动，无限重试直到连上
     backoff = 1
     while True:

@@ -306,7 +306,6 @@ async def update_task_status(
         raise HTTPException(status_code=404, detail="任务不存在")
     t.status = body.status
     t.reviewed = True
-    await db.commit()
 
     if body.status == "rejected" and t.author_id:
         from app.notification.Router import create_notification
@@ -317,8 +316,8 @@ async def update_task_status(
             content=f"你的任务「{t.title}」未通过审核：{reason}",
             link=f"/market/{t.id}",
         )
-        await db.commit()
 
+    await db.commit()
     return {"ok": True}
 
 
@@ -378,7 +377,6 @@ async def review_post(
         p.status = body.status
     if body.reviewed is not None:
         p.reviewed = body.reviewed
-    await db.commit()
 
     if body.status == "rejected" and p.author_id:
         from app.notification.Router import create_notification
@@ -390,8 +388,8 @@ async def review_post(
             content=f"你的{'帖子' if is_thread else '评论'}未通过审核：{reason}",
             link=f"/forum/post/{p.id}" if is_thread else f"/forum/post/{p.thread_id}",
         )
-        await db.commit()
 
+    await db.commit()
     return {"ok": True}
 
 
@@ -409,7 +407,6 @@ async def review_comment(
         c.status = body.status
     if body.reviewed is not None:
         c.reviewed = body.reviewed
-    await db.commit()
 
     if body.status == "rejected" and c.user_id:
         from app.notification.Router import create_notification
@@ -420,8 +417,8 @@ async def review_comment(
             content=f"你的评论未通过审核：{reason}",
             link=f"/market/{c.task_id}",
         )
-        await db.commit()
 
+    await db.commit()
     return {"ok": True}
 
 

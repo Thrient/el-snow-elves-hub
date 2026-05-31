@@ -18,13 +18,13 @@ class TestPublishConsume:
             received.append(data)
 
         await consume_review(callback)
+        await asyncio.sleep(0.5)  # 等待 consumer 注册完成
 
         await publish_review("post", 42)
 
-        # 给 RabbitMQ 一点时间投递
-        await asyncio.sleep(0.5)
+        await asyncio.sleep(1.0)  # 等待消息投递
 
-        assert len(received) == 1
+        assert len(received) == 1, f"Expected 1, got {len(received)}: {received}"
         assert received[0] == {"type": "post", "id": 42}
 
     @pytest.mark.asyncio
@@ -43,7 +43,7 @@ class TestPublishConsume:
         await publish_review("reply", 2)
         await publish_review("task", 3)
 
-        await asyncio.sleep(0.5)
+        await asyncio.sleep(2.0)
 
         assert len(received) == 3
         assert received[0]["type"] == "post"
@@ -64,10 +64,29 @@ class TestPublishConsume:
 
         await publish_review("comment", 99)
 
-        await asyncio.sleep(0.5)
+        await asyncio.sleep(2.0)
 
         assert len(received) == 1
         assert set(received[0].keys()) == {"type", "id"}
         assert received[0]["type"] == "comment"
         assert received[0]["id"] == 99
         assert isinstance(received[0]["id"], int)
+
+    @pytest.mark.asyncio
+    async def test_concurrent_publishes_are_serialized_by_lock(self):
+        """并发 publish 不会因竞态丢失 — 所有发布都应成功"""
+        from app.infrastructure.EventBus import publish_review, close_bus
+
+        # 关闭连接模拟冷启动，触发 _get_channel 的创建路径
+        await close_bus()
+
+        # 10 个并发 publish — 都必须在锁保护下安全完成
+        async def publish_one(i: int):
+            await publish_review("post", i)
+
+        # 不应抛异常
+        await asyncio.gather(*[publish_one(i) for i in range(10)])
+
+        # 连接创建成功
+        from app.infrastructure.EventBus import _connection
+        assert _connection is not None

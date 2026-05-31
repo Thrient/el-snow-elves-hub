@@ -25,6 +25,7 @@ from app.infrastructure.storage.entity.Fingerprint import Fingerprint
 from app.infrastructure.storage.entity.FileRecord import FileRecord
 from app.infrastructure.storage.StorageService import storage_service
 from app.infrastructure.storage.MinioClient import client as minio
+from app.infrastructure.EventBus import publish_review
 
 router = APIRouter(prefix="/tasks", tags=["任务市场"])
 
@@ -287,8 +288,10 @@ async def create_comment(
     db.add(c)
     t.comment_count += 1
     await db.commit()
-    from app.infrastructure.EventBus import publish_review
-    await publish_review("comment", c.id)
+    try:
+        await publish_review("comment", c.id)
+    except Exception as e:
+        print(f"Failed to enqueue review for comment #{c.id}: {e}")
     return ok({"id": c.id})
 
 
@@ -356,6 +359,8 @@ async def create_task(
     db.add(task)
     await db.commit()
     await db.refresh(task)
-    from app.infrastructure.EventBus import publish_review
-    await publish_review("task", task.id)
+    try:
+        await publish_review("task", task.id)
+    except Exception as e:
+        print(f"Failed to enqueue review for task #{task.id}: {e}")
     return ok(await _to_task(task, user.id, db))
