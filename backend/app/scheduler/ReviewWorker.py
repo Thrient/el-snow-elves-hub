@@ -20,20 +20,16 @@ OLLAMA_URL = "http://ollama:11434/api/chat"
 MODEL = "minicpm-v:8b"
 API_BASE = "http://localhost:8000/api/v1"
 
-REVIEW_PROMPT = """你是一个内容审核助手。审查以下内容是否有明确违规：
-- 色情/低俗
-- 暴力/恐怖
-- 政治敏感
-- 广告/垃圾
-- 人身攻击/辱骂
+REVIEW_PROMPT = """你是一个内容审核助手。检查内容是否包含以下违规：
+- 辱骂/人身攻击（包括拼音缩写如 sb/cnm/nmsl 等）
+- 色情/低俗内容
+- 政治敏感内容
+- 广告/垃圾信息
 
-规则：
-- 有明显违规 → pass=false
-- 正常内容/太短无法判断/无害闲聊 → pass=true
-- 有疑问时倾向于通过（pass=true）
+**重要**：只有**明确违规**才回复 pass=false。短文本/无意义字母/不确定的内容 → pass=true。
 
-严格回复 JSON（不要修改 key 名）：
-{"pass": true, "reason": "一句话原因"}
+严格回复 JSON：
+{"pass": true, "reason": "一句话"}
 
 内容：\n"""
 
@@ -83,14 +79,6 @@ async def ai_review_text(text: str, image_urls: list[str] | None = None) -> dict
             raw = data["message"]["content"]
             result = json.loads(raw)
             passed = result.get("pass", result.get("action") == "pass")
-            # 修正模型矛盾输出：reason 说无问题但 pass=false
-            if not passed:
-                r = result.get("reason", "").lower()
-                if any(kw in r for kw in ["doesn't appear", "no explicit", "no clear",
-                                            "does not appear", "does not contain",
-                                            "cannot determine", "unable to determine",
-                                            "不确定", "无法判断", "无明显", "未发现"]):
-                    passed = True
             return {"pass": passed, "reason": result.get("reason", "")}
     except Exception as e:
         print(f"AI review failed: {e}")
