@@ -19,12 +19,9 @@ instance.interceptors.response.use(
     bus.emit("app:error", msg);
 
     if (status === 401) {
-      // 登录/注册/refresh 端点的 401 不触发 refresh 逻辑
-      const skipUrls = ["/api/v1/auth/login", "/api/v1/auth/register", "/api/v1/auth/refresh"];
-      if (skipUrls.some((u) => err.config?.url === u)) {
-        if (err.config?.url === "/api/v1/auth/refresh") {
-          bus.emit("auth:expired");
-        }
+      // refresh 端点自身 401 不重试 — 避免无限循环
+      if (err.config?.url === "/api/v1/auth/refresh") {
+        bus.emit("auth:expired");
         return Promise.reject(err);
       }
       if (!refreshPromise) {

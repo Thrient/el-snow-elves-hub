@@ -122,14 +122,14 @@ async def login(
     user = (await db.execute(select(User).where(User.email == body.email))).scalar_one_or_none()
     if not user:
         _record_fail(r, fails_key, lock_key)
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="邮箱或密码错误")
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="邮箱或密码错误")
 
     if user.is_disabled:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="账号已被禁用，请联系管理员")
 
     if not verify_password(body.password, user.password_hash):
         _record_fail(r, fails_key, lock_key)
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="邮箱或密码错误")
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="邮箱或密码错误")
 
     r.delete(fails_key, lock_key)
 
