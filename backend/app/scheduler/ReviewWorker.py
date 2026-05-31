@@ -42,36 +42,55 @@ async def ai_review_text(text: str, image_urls: list[str] | None = None) -> dict
     """调 Ollama 审查，返回 {"pass": bool|None, "reason": str}"""
     messages = [{"role": "user", "content": REVIEW_PROMPT + text}]
 
+    image_b64s: list[str] = []
     if image_urls:
-        images = []
         async with httpx.AsyncClient(timeout=120) as cli:
             for url in image_urls:
                 try:
                     resp = await cli.get(url)
                     if resp.status_code == 200:
-                        import base64
-                        b64 = base64.b64encode(resp.content).decode()
-                        images.append({"type": "image_url", "image_url": {"url": f"data:image;base64,{b64}"}})
+                        import base64, io
+                        from PIL import Image
+                        img = Image.open(io.BytesIO(resp.content))
+                        img.thumbnail((512, 512))
+                        buf = io.BytesIO()
+                        img.save(buf, format="JPEG", quality=70)
+                        b64 = base64.b64encode(buf.getvalue()).decode()
+                        image_b64s.append(b64)
                 except Exception:
                     pass
-        if images:
-            content_parts = [{"type": "text", "text": REVIEW_PROMPT + text}] + images
-            messages = [{"role": "user", "content": content_parts}]
 
-    try:
-        async with httpx.AsyncClient(timeout=120) as cli:
-            resp = await cli.post(OLLAMA_URL, json={
+    last_error = None
+    for attempt in range(3):
+        try:
+            body: dict = {
                 "model": MODEL, "messages": messages,
                 "stream": False, "format": "json", "keep_alive": "10m",
-            })
-            data = resp.json()
-            raw = data["message"]["content"]
-            result = json.loads(raw)
-            passed = result.get("pass", result.get("action") == "pass")
-            return {"pass": passed, "reason": result.get("reason", "")}
-    except Exception as e:
-        print(f"AI review failed: {e}")
-        return {"pass": None, "reason": str(e)[:100]}
+            }
+            if image_b64s:
+                body["images"] = image_b64s
+            async with httpx.AsyncClient(timeout=120) as cli:
+                resp = await cli.post(OLLAMA_URL, json=body)
+                data = resp.json()
+                raw = data["message"]["content"]
+                result = json.loads(raw)
+                passed = result.get("pass", result.get("action") == "pass")
+                return {"pass": passed, "reason": result.get("reason", "")}
+        except (httpx.TimeoutException, httpx.ConnectError, httpx.RemoteProtocolError):
+            last_error = "network error"
+        except Exception as e:
+            last_error = str(e)[:100]
+            # 尝试获取实际响应内容以便调试
+            try:
+                body = resp.text[:200] if 'resp' in dir() else 'no response'
+                print(f"AI review attempt {attempt} failed: {e}, body={body}")
+            except Exception:
+                pass
+        if attempt < 2:
+            await asyncio.sleep(2)
+    # 3 次重试都失败
+    print(f"AI review failed after 3 retries: {last_error}")
+    return {"pass": None, "reason": last_error}
 
 
 async def _resolve_images(image_ids: list | None) -> list[str]:
@@ -109,7 +128,7 @@ async def _handle_message(data: dict):
         images = await _resolve_images(image_ids)
         result = await ai_review_text(text, images)
         if result["pass"] is None:
-            raise RuntimeError(f"AI unavailable for {type_} #{item_id}")
+            raise RuntimeError(f"AI unavailable for {type_} #{item_id} after retries")
         status = "approved" if result["pass"] else "rejected"
         print(f"AI {'passed' if result['pass'] else 'rejected'} {type_} #{item_id}: {result['reason']}")
         token = await _get_ai_token()
@@ -126,7 +145,7 @@ async def _handle_message(data: dict):
         images = await _resolve_images([t.cover_record_id] if t.cover_record_id else [])
         result = await ai_review_text(text, images)
         if result["pass"] is None:
-            raise RuntimeError(f"AI unavailable for {type_} #{item_id}")
+            raise RuntimeError(f"AI unavailable for {type_} #{item_id} after retries")
         status = "approved" if result["pass"] else "rejected"
         print(f"AI {'passed' if result['pass'] else 'rejected'} task #{item_id}: {result['reason']}")
         token = await _get_ai_token()
@@ -142,7 +161,7 @@ async def _handle_message(data: dict):
             text = c.content
         result = await ai_review_text(text)
         if result["pass"] is None:
-            raise RuntimeError(f"AI unavailable for {type_} #{item_id}")
+            raise RuntimeError(f"AI unavailable for {type_} #{item_id} after retries")
         status = "approved" if result["pass"] else "rejected"
         print(f"AI {'passed' if result['pass'] else 'rejected'} comment #{item_id}: {result['reason']}")
         token = await _get_ai_token()
