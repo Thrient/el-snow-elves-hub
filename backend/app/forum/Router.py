@@ -203,6 +203,8 @@ async def create_thread(
     db.add(p)
     await db.commit()
     await db.refresh(p)
+    from app.infrastructure.EventBus import publish_review
+    await publish_review("post", p.id)
     return ok({"id": p.id})
 
 
@@ -251,6 +253,9 @@ async def create_reply(
         await create_notification(db, parent.author_id, user.id, "mention",
             f"{user.username} 在评论中提到了你",
             f"/forum/post/{thread_id}")
+
+    from app.infrastructure.EventBus import publish_review
+    await publish_review("reply", r.id)
 
     return ok(ReplyOut(
         id=r.id, content=r.content, author=_author_out(user),

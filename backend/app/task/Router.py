@@ -287,6 +287,8 @@ async def create_comment(
     db.add(c)
     t.comment_count += 1
     await db.commit()
+    from app.infrastructure.EventBus import publish_review
+    await publish_review("comment", c.id)
     return ok({"id": c.id})
 
 
@@ -354,4 +356,6 @@ async def create_task(
     db.add(task)
     await db.commit()
     await db.refresh(task)
+    from app.infrastructure.EventBus import publish_review
+    await publish_review("task", task.id)
     return ok(await _to_task(task, user.id, db))
