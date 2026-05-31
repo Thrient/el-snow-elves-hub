@@ -20,7 +20,7 @@ OLLAMA_URL = "http://ollama:11434/api/chat"
 MODEL = "minicpm-v:8b"
 API_BASE = "http://localhost:8000/api/v1"
 
-REVIEW_PROMPT = """仅当内容包含明确的人身攻击（包括拼音缩写如 sb/cnm/nmsl）、色情描写或政治敏感时拒绝（pass=false）。不确定/短文本/日常对话一律通过（pass=true）。回复 JSON：{"pass": true, "reason": "原因"}\n\n内容：\n"""
+REVIEW_PROMPT = """同时审查文字和图片。仅当文字或图片包含明确的人身攻击（拼音缩写如sb/cnm/nmsl）、色情/裸露、政治敏感时拒绝（pass=false）。不确定/短文本/日常对话/正常图片一律通过（pass=true）。回复 JSON：{"pass": true, "reason": "原因"}\n\n内容：\n"""
 
 _ai_user_id: int | None = None
 
