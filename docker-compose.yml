@@ -2,6 +2,9 @@ services:
   rabbitmq:
     image: rabbitmq:4-alpine
     container_name: el-snow-hub-rabbitmq
+    ports:
+      - "5672:5672"
+      - "15672:15672"
     environment:
       RABBITMQ_DEFAULT_USER: elsnow
       RABBITMQ_DEFAULT_PASS: MqPass2024!@#
