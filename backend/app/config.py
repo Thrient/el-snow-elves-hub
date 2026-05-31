@@ -21,6 +21,9 @@ class Settings(BaseSettings):
     # Redis
     redis_url: str = "redis://localhost:6379/0"
 
+    # RabbitMQ
+    rabbitmq_url: str = "amqp://guest:guest@localhost:5672/"
+
     # JWT
     jwt_secret: str
     jwt_algorithm: str = "HS256"
