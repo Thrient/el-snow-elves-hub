@@ -13,17 +13,21 @@ instance.interceptors.response.use(
     }
 
     const { status } = err.response;
-
-    // 全局错误通知 — 后端返回 message 字段
-    const msg = err.response?.data?.message || `请求错误 (${status})`;
-    bus.emit("app:error", msg);
+    const msg: string = err.response?.data?.message || `请求错误 (${status})`;
 
     if (status === 401) {
-      // refresh 端点自身 401 不重试 — 避免无限循环
+      // refresh 自身失败 → 跳转登录
       if (err.config?.url === "/api/v1/auth/refresh") {
         bus.emit("auth:expired");
         return Promise.reject(err);
       }
+      // login/register 的 401 是正常错误（密码错等），不触发 refresh
+      const authUrls = ["/api/v1/auth/login", "/api/v1/auth/register"];
+      if (authUrls.includes(err.config?.url || "")) {
+        bus.emit("app:error", msg);
+        return Promise.reject(err);
+      }
+      // 其他 401 → 尝试 refresh token
       if (!refreshPromise) {
         refreshPromise = instance.post("/api/v1/auth/refresh").then(
           () => true,
@@ -35,6 +39,9 @@ instance.interceptors.response.use(
         return instance(err.config);
       }
       bus.emit("auth:expired");
+    } else {
+      // 非 401 错误 → 全局 toast
+      bus.emit("app:error", msg);
     }
 
     return Promise.reject(err);
