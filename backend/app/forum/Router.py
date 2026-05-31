@@ -14,9 +14,21 @@ from app.forum.entity.ForumBoard import ForumBoard
 from app.forum.entity.ForumPost import ForumPost
 from app.forum.entity.ForumLike import ForumLike
 from app.identity.entity.User import User
+from app.infrastructure.storage.StorageService import storage_service
 from app.notification.Router import create_notification
 
 router = APIRouter(prefix="/forum", tags=["论坛"])
+
+
+async def _resolve_images(db: AsyncSession, image_ids: list | None) -> list[str]:
+    if not image_ids:
+        return []
+    from app.infrastructure.storage.entity.FileRecord import FileRecord
+    recs = (await db.execute(
+        select(FileRecord).where(FileRecord.id.in_(image_ids))
+    )).scalars().all()
+    rec_map = {r.id: r for r in recs}
+    return [storage_service.url(rec_map[rid].fingerprint) for rid in image_ids if rid in rec_map]
 
 
 
@@ -155,7 +167,7 @@ async def get_thread(
         replies.append(ReplyOut(
             id=r.id, content=r.content, author=_author_out(r.author),
             parent_id=r.parent_id, parent_author=parent_author, parent_content=parent_content,
-            image_urls=[], like_count=like_counts.get(r.id, 0), liked=r.id in liked_ids,
+            image_urls=await _resolve_images(db, r.image_ids), like_count=like_counts.get(r.id, 0), liked=r.id in liked_ids,
             created_at=r.created_at, updated_at=r.updated_at,
         ))
 
@@ -163,7 +175,7 @@ async def get_thread(
     return ok(ThreadDetailOut(
         id=p.id, title=p.title, content=p.content, author=_author_out(p.author),
         board_id=p.board_id, board_name=board.name if board else "",
-        image_urls=[], is_pinned=p.is_pinned, is_locked=p.is_locked,
+        image_urls=await _resolve_images(db, p.image_ids), is_pinned=p.is_pinned, is_locked=p.is_locked,
         view_count=p.view_count, reply_count=p.reply_count, like_count=like_counts.get(p.id, 0),
         liked=p.id in liked_ids,
         last_reply_at=p.last_reply_at.isoformat() if p.last_reply_at else None,
@@ -245,7 +257,7 @@ async def create_reply(
         parent_id=r.parent_id if r.parent_id != thread_id else None,
         parent_author=parent_auth,
         parent_content=parent_content,
-        image_urls=[], like_count=0, liked=False,
+        image_urls=await _resolve_images(db, body.image_ids), like_count=0, liked=False,
         created_at=r.created_at, updated_at=r.updated_at,
     ))
 

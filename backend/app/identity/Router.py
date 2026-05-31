@@ -327,20 +327,18 @@ async def my_likes(
 
 @router.post("/users/me/avatar")
 async def set_avatar(
-    fingerprint_id: int = Form(...),
+    record_id: int = Form(...),
     user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
     _=Depends(require_perm_any("user:avatar")),
 ):
-    fp = (await db.execute(select(Fingerprint).where(Fingerprint.id == fingerprint_id))).scalar_one_or_none()
-    if not fp:
-        raise HTTPException(status.HTTP_400_BAD_REQUEST, detail="文件指纹不存在")
+    record = (await db.execute(select(FileRecord).where(FileRecord.id == record_id))).scalar_one_or_none()
+    if not record:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, detail="上传记录不存在")
+    fp = record.fingerprint
     if fp.detected_type and fp.detected_type not in ("png", "jpeg", "gif"):
         raise HTTPException(status.HTTP_400_BAD_REQUEST, detail="头像仅支持 PNG / JPEG / GIF 图片")
 
-    record = await storage_service.create_record(
-        db, fp, filename="avatar.png", uploaded_by=user.id,
-    )
     user.avatar_record_id = record.id
     await db.commit()
     await db.refresh(user)

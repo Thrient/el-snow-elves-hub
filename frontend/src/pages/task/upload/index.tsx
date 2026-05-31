@@ -14,12 +14,12 @@ const UploadPage: FC = () => {
   const navigate = useNavigate();
   const [file, setFile] = useState<File | null>(null);
   const [coverFile, setCoverFile] = useState<File | null>(null);
-  const [coverFingerprintId, setCoverFingerprintId] = useState<number | null>(null);
+  const [coverRecordId, setCoverRecordId] = useState<number | null>(null);
   const [coverUploading, setCoverUploading] = useState(false);
   const [phase, setPhase] = useState<UploadPhase>("idle");
   const [progress, setProgress] = useState(0);
   const [uploadedBytes, setUploadedBytes] = useState(0);
-  const [fingerprintId, setFingerprintId] = useState<number | null>(null);
+  const [zipRecordId, setZipRecordId] = useState<number | null>(null);
   const [dragOver, setDragOver] = useState(false);
   const [form, setForm] = useState({ title: "", description: "", tags: "", version: "1.0.0" });
 
@@ -30,7 +30,7 @@ const UploadPage: FC = () => {
         setProgress(pct);
         setUploadedBytes(Math.round(f.size * pct / 100));
       });
-      setFingerprintId(result.fingerprint_id);
+      setZipRecordId(result.record_id);
       setUploadedBytes(f.size); setProgress(100);
       setPhase("complete");
     } catch {
@@ -42,7 +42,7 @@ const UploadPage: FC = () => {
     setCoverFile(f); setCoverUploading(true);
     try {
       const result = await uploadFile(f);
-      setCoverFingerprintId(result.fingerprint_id);
+      setCoverRecordId(result.record_id);
     } catch { setCoverFile(null); }
     finally { setCoverUploading(false); }
   };
@@ -53,10 +53,10 @@ const UploadPage: FC = () => {
     if (f?.name.endsWith(".zip")) void startUpload(f);
   };
 
-  const resetFile = () => { setFile(null); setFingerprintId(null); setPhase("idle"); setProgress(0); };
+  const resetFile = () => { setFile(null); setZipRecordId(null); setPhase("idle"); setProgress(0); };
 
   const submit = async () => {
-    if (!fingerprintId) return message.warning("请先上传文件");
+    if (!zipRecordId) return message.warning("请先上传文件");
     if (!form.title.trim()) return message.warning("请输入任务名称");
     setPhase("submitting");
     try {
@@ -64,14 +64,14 @@ const UploadPage: FC = () => {
         title: form.title.trim(), description: form.description.trim(),
         category: "综合", tags: form.tags.trim(),
         version: form.version.trim() || "1.0.0",
-        zip_file_id: fingerprintId, filename: file?.name,
-        cover_fingerprint_id: coverFingerprintId || undefined,
+        zip_record_id: zipRecordId, filename: file?.name,
+        cover_record_id: coverRecordId || undefined,
       });
       message.success("发布成功"); navigate("/market");
     } catch { setPhase("complete"); }
   };
 
-  const step = !file ? 1 : fingerprintId ? 3 : 2;
+  const step = !file ? 1 : zipRecordId ? 3 : 2;
 
   return (
     <div className="max-w-[41rem] mx-auto pt-8">
@@ -142,9 +142,9 @@ const UploadPage: FC = () => {
                 <PictureOutlined className="text-[#b8afa6]" />
                 <span className="text-[0.8125rem] text-[#6b5e55]">
                   {coverUploading ? <span className="text-[#faad14]">上传中...</span>
-                   : coverFingerprintId ? <>
+                   : coverRecordId ? <>
                        <span className="text-[#22c55e]">{coverFile?.name} ✓</span>
-                       <span onClick={(e) => { e.stopPropagation(); setCoverFile(null); setCoverFingerprintId(null); }}
+                       <span onClick={(e) => { e.stopPropagation(); setCoverFile(null); setCoverRecordId(null); }}
                          className="ml-2 text-[#b8afa6] cursor-pointer hover:text-[#d4513b]">× 移除</span>
                      </>
                    : "点击上传封面图"}
@@ -155,10 +155,10 @@ const UploadPage: FC = () => {
         </div>
       </div>
 
-      <Button type="primary" size="large" loading={phase === "submitting"} disabled={!fingerprintId}
+      <Button type="primary" size="large" loading={phase === "submitting"} disabled={!zipRecordId}
         onClick={submit} block
         className="h-12.5 rounded-3.5 text-base font-600"
-        style={fingerprintId ? {
+        style={zipRecordId ? {
           background: "linear-gradient(135deg, #d4513b, #c4402a)", border: "none",
           boxShadow: "0 6px 24px rgba(212,81,59,0.35)",
         } : undefined}>

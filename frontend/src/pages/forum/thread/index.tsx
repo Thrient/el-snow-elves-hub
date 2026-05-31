@@ -51,7 +51,7 @@ const ForumThreadPage: FC = () => {
       let imgIds: number[] = [];
       if (replyImages.length > 0) {
         const results = await Promise.all(replyImages.map((f) => forumApi.uploadImage(f)));
-        imgIds = results.map((r) => r.fingerprint_id);
+        imgIds = results.map((r) => r.record_id);
       }
       const res = await forumApi.createReply(thread.id, replyText.trim(), replyingTo?.id, imgIds);
       const reply: ReplyItem = res.data;

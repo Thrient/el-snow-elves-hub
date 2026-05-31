@@ -21,9 +21,9 @@ export const usersApi = {
     api.get<{ code: number; data: UserLike[] }>("/api/v1/users/me/likes").then((r) => r.data),
 
   uploadAvatar: async (file: File) => {
-    const { fingerprint_id } = await uploadFile(file);
+    const { record_id } = await uploadFile(file);
     const fd = new FormData();
-    fd.append("fingerprint_id", String(fingerprint_id));
+    fd.append("record_id", String(record_id));
     return api.post<{ code: number; data: { avatar_url: string } }>("/api/v1/users/me/avatar", fd);
   },
 };

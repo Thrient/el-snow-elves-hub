@@ -32,7 +32,7 @@ const ImageUpload: FC<Props> = ({ images, setImages }) => {
       try {
         const res = await forumApi.uploadImage(file);
         setImages((prev) => prev.map((img) =>
-          img.file === file ? { ...img, uploading: false, fileId: res.fingerprint_id } : img));
+          img.file === file ? { ...img, uploading: false, fileId: res.record_id } : img));
       } catch {
         setImages((prev) => prev.map((img) =>
           img.file === file ? { ...img, uploading: false } : img));

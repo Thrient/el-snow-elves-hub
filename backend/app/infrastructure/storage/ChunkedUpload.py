@@ -58,6 +58,12 @@ class ChunkedUpload:
         fp = await storage_service.store(db, buf.getvalue())
         fp.detected_type = detect_type(buf.getvalue())
 
+        record = await storage_service.create_record(
+            db, fp,
+            filename=upload.filename,
+            uploaded_by=upload.uploaded_by,
+        )
+
         for n in chunks:
             try:
                 minio.delete(f"chunks/{upload_id}/{n}")
@@ -66,7 +72,7 @@ class ChunkedUpload:
 
         await db.delete(upload)
         await db.commit()
-        return fp
+        return fp, record
 
     async def cleanup_expired(self, db: AsyncSession) -> int:
         """清理过期的上传会话及分片，返回清理数量"""

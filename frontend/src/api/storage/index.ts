@@ -18,18 +18,17 @@ export const uploadApi = {
     return api.post(`/api/v1/uploads/${uploadId}/chunk?n=${chunkIndex}`, form);
   },
 
-  complete: (uploadId: string): Promise<{ fingerprint_id: number }> =>
-    api.post<{ code: number; data: { fingerprint_id: number } }>(`/api/v1/uploads/${uploadId}/complete`).then((r) => r.data),
+  complete: (uploadId: string): Promise<{ record_id: number }> =>
+    api.post<{ code: number; data: { record_id: number } }>(`/api/v1/uploads/${uploadId}/complete`).then((r) => r.data),
 };
 
 /**
- * 统一文件上传 — 所有上传走分块流程，小文件=1个分片
- * 返回 { fingerprint_id }，消费端用它调用业务接口
+ * 统一文件上传 — 返回 { record_id }，消费端用 record_id 调用业务接口
  */
-export async function uploadFile(file: File, onProgress?: (pct: number) => void): Promise<{ fingerprint_id: number }> {
+export async function uploadFile(file: File, onProgress?: (pct: number) => void): Promise<{ record_id: number }> {
   const sha256 = await computeSHA256(file, (p) => onProgress?.(Math.round(p * 0.1)));
   const check = await uploadApi.check(sha256);
-  if (check.exists && check.fingerprint_id) return { fingerprint_id: check.fingerprint_id };
+  if (check.exists && check.record_id) return { record_id: check.record_id };
 
   const totalChunks = Math.ceil(file.size / CHUNK_SIZE);
   const session = await uploadApi.init(file.name, file.size, totalChunks);

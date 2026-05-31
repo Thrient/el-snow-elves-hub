@@ -54,7 +54,7 @@ async def complete_upload(
     _v=Depends(require_verified),
 ):
     try:
-        fp = await chunked_upload.complete(db, upload_id)
+        fp, record = await chunked_upload.complete(db, upload_id)
     except ValueError as e:
         raise HTTPException(400, str(e))
-    return ok({"fingerprint_id": fp.id, "url": storage_service.url(fp)})
+    return ok({"record_id": record.id})
