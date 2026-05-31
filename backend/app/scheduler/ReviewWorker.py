@@ -23,7 +23,7 @@ OLLAMA_URL = "http://ollama:11434/api/generate"
 MODEL = "minicpm-v:8b"
 API_BASE = "http://localhost:8000/api/v1"
 
-REVIEW_PROMPT = """同时审查文字和图片。仅当文字或图片包含明确的人身攻击（拼音缩写如sb/cnm/nmsl）、色情/裸露、政治敏感时拒绝（pass=false）。不确定/短文本/日常对话/正常图片一律通过（pass=true）。回复 JSON：{"pass": true, "reason": "原因"}\n\n内容：\n"""
+REVIEW_PROMPT = """同时审查文字和图片。仅当文字或图片包含明确的人身攻击（拼音缩写如sb/cnm/nmsl）、色情/裸露、政治敏感时拒绝（pass=false）。不确定/短文本/日常对话/正常图片一律通过（pass=true）。必须回复包含reason的JSON：{"pass": true, "reason": "具体原因"}\n\n内容：\n"""
 
 _ai_user_id: int | None = None
 
@@ -76,7 +76,10 @@ async def ai_review_text(text: str, image_urls: list[str] | None = None) -> dict
                 raw = data["response"]
                 result = json.loads(raw)
                 passed = result.get("pass", result.get("action") == "pass")
-                return {"pass": passed, "reason": result.get("reason", "")}
+                reason = result.get("reason", "")
+                if not reason:
+                    reason = "内容违规" if not passed else "内容正常"
+                return {"pass": passed, "reason": reason}
         except (httpx.TimeoutException, httpx.ConnectError, httpx.RemoteProtocolError):
             last_error = "network error"
         except Exception as e:
