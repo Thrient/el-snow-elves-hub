@@ -30,15 +30,24 @@ class MinioClient:
         self._client.put_object(Bucket=self._bucket, Key=key, Body=data, ContentType=content_type)
 
     def get_url(self, key: str) -> str:
-        """生成预签名下载链接，有效期 1 小时"""
+        """生成预签名下载链接，缓存 7 天"""
+        from app.infrastructure.Redis import get_redis
+        r = get_redis()
+        cache_key = f"minio:url:{self._bucket}:{key}"
+        cached = r.get(cache_key)
+        if cached:
+            return cached.decode()
+
         url = self._client.generate_presigned_url(
             "get_object",
             Params={"Bucket": self._bucket, "Key": key},
-            ExpiresIn=3600,
+            ExpiresIn=604800,  # 7 days
         )
         if settings.minio_public_endpoint:
             internal = f"http{'s' if settings.minio_secure else ''}://{settings.minio_endpoint}"
             url = url.replace(internal, settings.minio_public_endpoint)
+
+        r.setex(cache_key, 604800, url)
         return url
 
     def download(self, key: str) -> tuple[bytes, str]:

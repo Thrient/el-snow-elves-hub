@@ -54,8 +54,11 @@ const AdminPostsPage: FC = () => {
       <Table dataSource={posts} rowKey="id" loading={loading}
         pagination={{ pageSize: 20 }} className="bg-white rounded-3"
         columns={[
-          { title: type === "threads" ? "标题" : "内容", dataIndex: type === "threads" ? "title" : "content", ellipsis: true, width: type === "threads" ? undefined : 300,
-            render: (v: string) => v ? (v.length > 80 ? v.slice(0, 80) + "…" : v) : "—" },
+          { title: type === "threads" ? "标题" : "评论", dataIndex: type === "threads" ? "title" : "content",
+            ellipsis: true, width: type === "threads" ? undefined : 300,
+            render: (v: string) => v || "—" },
+          ...(type === "threads" ? [{ title: "内容", dataIndex: "content", ellipsis: true, width: 250,
+            render: (v: string) => v ? (v.length > 60 ? v.slice(0, 60) + "…" : v) : "—" }] : []),
           { title: "用户", dataIndex: "author_name", width: 80 },
           { title: "状态", dataIndex: "status", width: 70,
             render: (s: string) => <Tag color={STATUS_MAP[s]?.color}>{STATUS_MAP[s]?.label}</Tag> },
@@ -83,7 +86,7 @@ const AdminPostsPage: FC = () => {
       <Modal title={detail?.title || "详情"} open={!!detail} onCancel={() => setDetail(null)} footer={null} width={640}>
         {detail && (
           <Descriptions column={1} size="small">
-            <Descriptions.Item label="作者">{detail.author_name}</Descriptions.Item>
+            <Descriptions.Item label="用户">{detail.author_name}</Descriptions.Item>
             <Descriptions.Item label="状态"><Tag color={STATUS_MAP[detail.status]?.color}>{STATUS_MAP[detail.status]?.label}</Tag></Descriptions.Item>
             <Descriptions.Item label="内容" contentStyle={{ whiteSpace: "pre-wrap" }}>{detail.content}</Descriptions.Item>
             {detail.image_urls?.length > 0 && (
