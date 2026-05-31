@@ -14,6 +14,10 @@ instance.interceptors.response.use(
 
     const { status } = err.response;
 
+    // 全局错误通知 — 后端返回 message 字段
+    const msg = err.response?.data?.message || `请求错误 (${status})`;
+    bus.emit("app:error", msg);
+
     if (status === 401) {
       // 不重试 refresh 端点本身 — 避免 await refreshPromise 循环依赖
       if (err.config?.url === "/api/v1/auth/refresh") {
@@ -31,10 +35,6 @@ instance.interceptors.response.use(
         return instance(err.config);
       }
       bus.emit("auth:expired");
-    } else {
-      // 全局错误通知 — 后端返回 message 字段，校验错误已在后端统一为字符串
-      const msg = err.response?.data?.message || `请求错误 (${status})`;
-      bus.emit("app:error", msg);
     }
 
     return Promise.reject(err);
