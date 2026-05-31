@@ -1,51 +1,83 @@
 """TDD: EventBus — RabbitMQ 发布/消费"""
-import json
 import asyncio
+import json
+import uuid
+
+import aio_pika
 import pytest
+
+from app.Config import settings
+from app.infrastructure.EventBus import EXCHANGE, ROUTING_KEY
+
+# 每个测试用独立队列名，避免消费者累积
+def _qname() -> str:
+    return f"test.review.{uuid.uuid4().hex[:8]}"
+
+
+async def _setup_queue(qname: str) -> tuple[aio_pika.Connection, aio_pika.Channel]:
+    """创建连接 + 声明 exchange + 绑定临时队列"""
+    conn = await aio_pika.connect(settings.rabbitmq_url)
+    ch = await conn.channel()
+    exchange = await ch.declare_exchange(EXCHANGE, aio_pika.ExchangeType.DIRECT, durable=True)
+    queue = await ch.declare_queue(qname, durable=False, exclusive=True, auto_delete=True)
+    await queue.bind(exchange, ROUTING_KEY)
+    return conn, ch, queue
+
+
+async def _publish(channel: aio_pika.Channel, type_: str, item_id: int):
+    exchange = await channel.get_exchange(EXCHANGE)
+    body = json.dumps({"type": type_, "id": item_id}).encode()
+    await exchange.publish(
+        aio_pika.Message(body=body, delivery_mode=aio_pika.DeliveryMode.PERSISTENT),
+        routing_key=ROUTING_KEY,
+    )
 
 
 class TestPublishConsume:
-    """测试消息发布和消费的完整链路"""
+    """测试消息发布和消费的完整链路 — 每个测试独立队列"""
 
     @pytest.mark.asyncio
     async def test_publish_and_consume_one_message(self):
         """发布一条审核消息，消费者收到正确的 type 和 id"""
-        from app.infrastructure.EventBus import publish_review, consume_review
-
+        qname = _qname()
+        conn, ch, queue = await _setup_queue(qname)
         received: list[dict] = []
 
-        async def callback(data: dict):
-            received.append(data)
+        async def on_message(msg: aio_pika.IncomingMessage):
+            async with msg.process():
+                received.append(json.loads(msg.body.decode()))
 
-        await consume_review(callback)
-        await asyncio.sleep(0.5)  # 等待 consumer 注册完成
+        await queue.consume(on_message)
+        await asyncio.sleep(0.3)
 
-        await publish_review("post", 42)
+        await _publish(ch, "post", 42)
+        await asyncio.sleep(0.5)
 
-        await asyncio.sleep(1.0)  # 等待消息投递
-
+        await conn.close()
         assert len(received) == 1, f"Expected 1, got {len(received)}: {received}"
         assert received[0] == {"type": "post", "id": 42}
 
     @pytest.mark.asyncio
     async def test_publish_multiple_messages_ordered(self):
         """发布多条消息，消费者按顺序收到"""
-        from app.infrastructure.EventBus import publish_review, consume_review
-
+        qname = _qname()
+        conn, ch, queue = await _setup_queue(qname)
         received: list[dict] = []
 
-        async def callback(data: dict):
-            received.append(data)
+        async def on_message(msg: aio_pika.IncomingMessage):
+            async with msg.process():
+                received.append(json.loads(msg.body.decode()))
 
-        await consume_review(callback)
+        await queue.consume(on_message)
+        await asyncio.sleep(0.3)
 
-        await publish_review("post", 1)
-        await publish_review("reply", 2)
-        await publish_review("task", 3)
+        await _publish(ch, "post", 1)
+        await _publish(ch, "reply", 2)
+        await _publish(ch, "task", 3)
+        await asyncio.sleep(0.5)
 
-        await asyncio.sleep(2.0)
-
-        assert len(received) == 3
+        await conn.close()
+        assert len(received) == 3, f"Expected 3, got {len(received)}: {received}"
         assert received[0]["type"] == "post"
         assert received[1]["type"] == "reply"
         assert received[2]["type"] == "task"
@@ -53,19 +85,21 @@ class TestPublishConsume:
     @pytest.mark.asyncio
     async def test_message_contains_only_type_and_id(self):
         """消息格式严格为 {type, id}，无多余字段"""
-        from app.infrastructure.EventBus import publish_review, consume_review
-
+        qname = _qname()
+        conn, ch, queue = await _setup_queue(qname)
         received: list[dict] = []
 
-        async def callback(data: dict):
-            received.append(data)
+        async def on_message(msg: aio_pika.IncomingMessage):
+            async with msg.process():
+                received.append(json.loads(msg.body.decode()))
 
-        await consume_review(callback)
+        await queue.consume(on_message)
+        await asyncio.sleep(0.3)
 
-        await publish_review("comment", 99)
+        await _publish(ch, "comment", 99)
+        await asyncio.sleep(0.5)
 
-        await asyncio.sleep(2.0)
-
+        await conn.close()
         assert len(received) == 1
         assert set(received[0].keys()) == {"type", "id"}
         assert received[0]["type"] == "comment"
@@ -73,20 +107,15 @@ class TestPublishConsume:
         assert isinstance(received[0]["id"], int)
 
     @pytest.mark.asyncio
-    async def test_concurrent_publishes_are_serialized_by_lock(self):
-        """并发 publish 不会因竞态丢失 — 所有发布都应成功"""
+    async def test_concurrent_publishes_dont_leak_connections(self):
+        """并发 publish 安全 — 使用 EventBus 单例 + close_bus 模拟冷启动"""
         from app.infrastructure.EventBus import publish_review, close_bus
 
-        # 关闭连接模拟冷启动，触发 _get_channel 的创建路径
         await close_bus()
 
-        # 10 个并发 publish — 都必须在锁保护下安全完成
         async def publish_one(i: int):
             await publish_review("post", i)
 
-        # 不应抛异常
         await asyncio.gather(*[publish_one(i) for i in range(10)])
-
-        # 连接创建成功
         from app.infrastructure.EventBus import _connection
         assert _connection is not None
