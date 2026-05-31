@@ -1,7 +1,7 @@
 """任务评论"""
 from datetime import datetime
 
-from sqlalchemy import DateTime, ForeignKey, Integer, Text, func
+from sqlalchemy import Boolean, DateTime, ForeignKey, Integer, String, Text, func
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.infrastructure.Database import Base
@@ -17,4 +17,6 @@ class Comment(Base):
     parent_id: Mapped[int | None] = mapped_column(
         ForeignKey("comments.id", ondelete="CASCADE"), nullable=True
     )
+    status: Mapped[str] = mapped_column(String(16), default="approved", comment="approved/rejected")
+    reviewed: Mapped[bool] = mapped_column(Boolean, default=False)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())

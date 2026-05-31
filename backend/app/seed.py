@@ -55,6 +55,7 @@ PERMISSION_CODES = {
     "task:comment": "发表评论",
     "task:approve": "审核任务",
     "task:delete": "删除任务",
+    "forum:review": "审核帖子/评论",
     "forum:boards": "查看论坛板块",
     "forum:search": "搜索帖子",
     "forum:threads": "查看帖子列表",
@@ -302,12 +303,19 @@ async def seed():
 
     # 兼容迁移：detected_type 列
     try:
-        from sqlalchemy import text
-        await db.execute(text("ALTER TABLE fingerprints ADD COLUMN detected_type VARCHAR(16) NULL"))
-        await db.commit()
-        print("迁移: detected_type 列已添加")
+        for sql in [
+            "ALTER TABLE fingerprints ADD COLUMN detected_type VARCHAR(16) NULL",
+            "ALTER TABLE forum_posts ADD COLUMN status VARCHAR(16) DEFAULT 'approved'",
+            "ALTER TABLE forum_posts ADD COLUMN reviewed TINYINT(1) DEFAULT 0",
+            "ALTER TABLE comments ADD COLUMN status VARCHAR(16) DEFAULT 'approved'",
+            "ALTER TABLE comments ADD COLUMN reviewed TINYINT(1) DEFAULT 0",
+            "ALTER TABLE tasks ADD COLUMN reviewed TINYINT(1) DEFAULT 0",
+        ]:
+            try: await db.execute(text(sql)); await db.commit()
+            except: await db.rollback()
+        print("迁移: 兼容列已检查")
     except Exception:
-        await db.rollback()
+        pass
 
 
 if __name__ == "__main__":

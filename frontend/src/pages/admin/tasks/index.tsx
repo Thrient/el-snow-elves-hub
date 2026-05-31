@@ -1,5 +1,5 @@
 import { useEffect, useState, type FC } from "react";
-import { Table, Button, Select, message, Popconfirm, Tag, Modal, Descriptions, Space } from "antd";
+import { Table, Button, Select, message, Popconfirm, Tag, Modal, Descriptions, Space, Tabs } from "antd";
 import { DeleteOutlined, EyeOutlined } from "@ant-design/icons";
 import { useAuthStore } from "@/store/auth";
 import { adminApi } from "@/api/admin";
@@ -18,6 +18,7 @@ const TasksPage: FC = () => {
   const hasPerm = useAuthStore((s) => s.hasPerm);
   const canApprove = hasPerm("task:approve");
   const canDelete = hasPerm("task:delete");
+  const [filter, setFilter] = useState<"unreviewed" | "all">("unreviewed");
 
   const load = () => adminApi.listTasks().then(setTasks);
   useEffect(() => { void load(); }, []);
@@ -36,8 +37,10 @@ const TasksPage: FC = () => {
 
   return (
     <div className="pt-8 w-[min(94%,70rem)] mx-auto">
-      <h2 className="text-[1.125rem] font-600 text-[#3d3630] mb-6">任务管理</h2>
-      <Table dataSource={tasks} rowKey="id" loading={loading}
+      <h2 className="text-[1.125rem] font-600 text-[#3d3630] mb-2">任务管理</h2>
+      <Tabs activeKey={filter} onChange={(k) => setFilter(k as any)} className="mb-4"
+        items={[{ key: "unreviewed", label: "未审核" }, { key: "all", label: "全部" }]} />
+      <Table dataSource={filter === "unreviewed" ? tasks.filter((t) => !t.reviewed) : tasks} rowKey="id" loading={loading}
         pagination={{ pageSize: 20 }} className="bg-white rounded-3" scroll={{ y: "calc(100vh - 330px)" }}
         columns={[
           { title: "ID", dataIndex: "id", width: 50 },
@@ -69,18 +72,20 @@ const TasksPage: FC = () => {
         ]}
       />
 
-      <Modal title="任务详情" open={!!detail} onCancel={() => setDetail(null)} footer={null}>
+      <Modal title={detail?.title || "任务详情"} open={!!detail} onCancel={() => setDetail(null)} footer={null} width={640}>
         {detail && (
-          <Descriptions column={1} size="small">
-            <Descriptions.Item label="ID">{detail.id}</Descriptions.Item>
-            <Descriptions.Item label="标题">{detail.title}</Descriptions.Item>
+          <Descriptions column={1} size="small" labelStyle={{ width: 60 }}>
+            <Descriptions.Item label="作者">{detail.author_name || `#${detail.author_id}`}</Descriptions.Item>
             <Descriptions.Item label="分类">{detail.category}</Descriptions.Item>
             <Descriptions.Item label="版本">{detail.version}</Descriptions.Item>
             <Descriptions.Item label="状态"><Tag color={STATUS_MAP[detail.status]?.color}>{STATUS_MAP[detail.status]?.label}</Tag></Descriptions.Item>
+            <Descriptions.Item label="标签">{detail.tags || "—"}</Descriptions.Item>
+            <Descriptions.Item label="文件">{detail.file_size ? `${(detail.file_size / 1024).toFixed(1)} KB` : "—"}</Descriptions.Item>
             <Descriptions.Item label="下载">{detail.download_count}</Descriptions.Item>
             <Descriptions.Item label="点赞">{detail.like_count}</Descriptions.Item>
-            <Descriptions.Item label="大小">{detail.file_size ? `${(detail.file_size / 1024).toFixed(1)} KB` : "—"}</Descriptions.Item>
-            <Descriptions.Item label="创建时间">{new Date(detail.created_at).toLocaleString("zh-CN")}</Descriptions.Item>
+            <Descriptions.Item label="描述" contentStyle={{ whiteSpace: "pre-wrap" }}>{detail.description || "—"}</Descriptions.Item>
+            {detail.cover_url && <Descriptions.Item label="封面"><img src={detail.cover_url} alt="" className="max-w-full max-h-60 rounded-2" /></Descriptions.Item>}
+            <Descriptions.Item label="时间">{new Date(detail.created_at).toLocaleString("zh-CN")}</Descriptions.Item>
           </Descriptions>
         )}
       </Modal>

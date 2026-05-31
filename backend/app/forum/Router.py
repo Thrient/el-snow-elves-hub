@@ -90,7 +90,7 @@ async def search_threads(
     db: AsyncSession = Depends(get_db),
     _=Depends(require_perm_any("forum:search")),
 ):
-    query = select(ForumPost).where(and_(ForumPost.parent_id == None, ForumPost.title.contains(q)))
+    query = select(ForumPost).where(and_(ForumPost.parent_id == None, ForumPost.title.contains(q), ForumPost.status != "rejected"))
     total = (await db.execute(select(func.count()).select_from(query.subquery()))).scalar() or 0
     items = (await db.execute(query.offset((page - 1) * 20).limit(20).order_by(desc(ForumPost.created_at)))).scalars().all()
     return ok({"items": [_thread_out(t) for t in items], "total": total, "page": page, "pages": math.ceil(total / 20)})
@@ -104,7 +104,7 @@ async def list_threads(
     db: AsyncSession = Depends(get_db),
     _=Depends(require_perm_any("forum:threads")),
 ):
-    query = select(ForumPost).where(and_(ForumPost.board_id == board_id, ForumPost.parent_id == None))
+    query = select(ForumPost).where(and_(ForumPost.board_id == board_id, ForumPost.parent_id == None, ForumPost.status != "rejected"))
     total = (await db.execute(select(func.count()).select_from(query.subquery()))).scalar() or 0
     items = (await db.execute(
         query.offset((page - 1) * 20).limit(20).order_by(desc(ForumPost.is_pinned), desc(ForumPost.last_reply_at), desc(ForumPost.created_at))
@@ -119,7 +119,7 @@ async def get_thread(
     _=Depends(require_perm_any("forum:view")),
 ):
     p = (await db.execute(select(ForumPost).where(ForumPost.id == thread_id))).scalar_one_or_none()
-    if not p:
+    if not p or p.status == "rejected":
         raise HTTPException(404, "帖子不存在")
 
     from app.infrastructure.Redis import get_redis
@@ -133,7 +133,7 @@ async def get_thread(
 
     # Collect all post IDs in this thread + query current user's likes
     all = list((await db.execute(
-        select(ForumPost).where(ForumPost.thread_id == thread_id).order_by(ForumPost.created_at)
+        select(ForumPost).where(ForumPost.thread_id == thread_id, ForumPost.status != "rejected").order_by(ForumPost.created_at)
     )).scalars().all())
     thread_post_ids = {p.id, *(r.id for r in all)}
     liked_ids: set[int] = set()

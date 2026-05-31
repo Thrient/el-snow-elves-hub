@@ -1,6 +1,6 @@
 import { api } from "@/api/axios";
 import { uploadFile } from "@/api/storage";
-import type { AdminStats, AdminUser, RoleItem, PermItem, AdminVersion, AdminTask, RouteAdmin } from "@/types";
+import type { AdminStats, AdminUser, RoleItem, PermItem, AdminVersion, AdminTask, AdminPost, RouteAdmin } from "@/types";
 
 export const adminApi = {
   // Dashboard
@@ -55,6 +55,15 @@ export const adminApi = {
   updateTaskStatus: (id: number, status: string) =>
     api.put(`/api/v1/admin/tasks/${id}/status`, { status }),
   deleteTask: (id: number) => api.delete(`/api/v1/tasks/${id}`),
+
+  // Posts / Comments review
+  listPosts: (type: "threads" | "replies", reviewed?: boolean) => {
+    const params: Record<string, string> = { type };
+    if (reviewed !== undefined) params.reviewed = String(reviewed);
+    return api.get<AdminPost[]>(`/api/v1/admin/posts`, { params });
+  },
+  reviewPost: (id: number, data: { status?: string; reviewed?: boolean }) =>
+    api.put(`/api/v1/admin/posts/${id}/review`, data),
 
   // Routes
   listRoutes: () => api.get<RouteAdmin[]>("/api/v1/admin/routes"),

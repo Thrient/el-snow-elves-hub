@@ -1,5 +1,5 @@
 """管理后台 — 不设统一鉴权，每个端点自管权限"""
-from fastapi import APIRouter, Depends, File, HTTPException, UploadFile, status
+from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile, status
 from sqlalchemy import delete, func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -30,6 +30,7 @@ from app.admin.Schema.RbacSchema import PermCreate, PermUpdate, RoleCreate, Role
 from app.admin.Schema.TaskStatusUpdate import TaskStatusUpdate
 from app.admin.Schema.RouteCreate import RouteCreate
 from app.admin.Schema.RouteUpdate import RouteUpdate
+from app.admin.Schema.ReviewAction import ReviewAction
 
 router = APIRouter(prefix="/admin", tags=["管理后台"])
 
@@ -300,6 +301,63 @@ async def update_task_status(task_id: int, body: TaskStatusUpdate, db: AsyncSess
     if not t:
         raise HTTPException(status_code=404, detail="任务不存在")
     t.status = body.status
+    t.reviewed = True
+    await db.commit()
+    return {"ok": True}
+
+
+# ═══════════════════════════════════════════
+# Posts / Comments Review
+# ═══════════════════════════════════════════
+
+@router.get("/posts", dependencies=[Depends(require_perm("forum:review"))])
+async def list_posts(
+    type: str = Query("threads"), reviewed: str = Query(""),
+    db: AsyncSession = Depends(get_db),
+):
+    q = select(ForumPost)
+    if type == "threads":
+        q = q.where(ForumPost.thread_id.is_(None))
+    else:
+        q = q.where(ForumPost.thread_id.isnot(None))
+    if reviewed == "false":
+        q = q.where(ForumPost.reviewed == False)
+    q = q.order_by(ForumPost.created_at.desc())
+    posts = (await db.execute(q)).scalars().all()
+
+    # 批量解析图片 URL
+    all_fp_ids: set[int] = set()
+    for p in posts:
+        if p.image_ids:
+            for rid in p.image_ids:
+                all_fp_ids.add(rid)
+    rec_map: dict[int, Fingerprint] = {}
+    if all_fp_ids:
+        recs = (await db.execute(
+            select(FileRecord).where(FileRecord.id.in_(all_fp_ids))
+        )).scalars().all()
+        rec_map = {r.id: r.fingerprint for r in recs}
+
+    return [{
+        "id": p.id, "title": p.title, "content": p.content[:200] if p.content else "",
+        "author_name": p.author.username if p.author else "匿名",
+        "board_id": p.board_id, "status": p.status,
+        "reviewed": p.reviewed, "thread_id": p.thread_id,
+        "image_urls": [storage_service.url(rec_map[rid]) for rid in (p.image_ids or []) if rid in rec_map],
+        "created_at": p.created_at.isoformat(),
+    } for p in posts]
+
+
+@router.put("/posts/{post_id}/review",
+            dependencies=[Depends(require_perm("forum:review"))])
+async def review_post(post_id: int, body: ReviewAction, db: AsyncSession = Depends(get_db)):
+    p = (await db.execute(select(ForumPost).where(ForumPost.id == post_id))).scalar_one_or_none()
+    if not p:
+        raise HTTPException(404, "帖子不存在")
+    if body.status is not None:
+        p.status = body.status
+    if body.reviewed is not None:
+        p.reviewed = body.reviewed
     await db.commit()
     return {"ok": True}
 

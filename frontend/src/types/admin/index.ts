@@ -44,13 +44,24 @@ export interface AdminTask {
   id: number;
   title: string;
   author_id: number;
+  author_name: string;
   category: string;
+  tags: string;
   version: string;
+  description: string;
   status: string;
   download_count: number;
   like_count: number;
   file_size: number | null;
+  cover_url: string | null;
+  reviewed: boolean;
   created_at: string;
+}
+
+export interface AdminPost {
+  id: number; title: string; content: string;
+  author_name: string; board_id: number; status: string;
+  reviewed: boolean; image_urls: string[]; created_at: string;
 }
 
 export interface RouteAdmin {
