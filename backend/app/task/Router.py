@@ -216,21 +216,6 @@ async def delete_task(
         raise HTTPException(404, "任务不存在")
 
     await require_owner(task, user)
-
-    for record_id in (task.file_record_id, task.cover_record_id):
-        if record_id:
-            record = (await db.execute(select(FileRecord).where(FileRecord.id == record_id))).scalar_one_or_none()
-            if record:
-                ref_count = (await db.execute(
-                    select(func.count()).select_from(Task).where(
-                        or_(Task.file_record_id == record_id, Task.cover_record_id == record_id)
-                    )
-                )).scalar() or 0
-                if ref_count <= 1:
-                    minio.delete(record.fingerprint.sha256)
-                    await db.delete(record.fingerprint)
-                    await db.delete(record)
-
     await db.delete(task)
     await db.commit()
     return ok({})

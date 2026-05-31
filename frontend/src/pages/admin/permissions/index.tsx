@@ -18,7 +18,7 @@ const PermissionsPage: FC = () => {
 
   const load = () => {
     setLoading(true);
-    adminApi.listPermissions().then(setPerms).catch(() => message.error("加载失败")).finally(() => setLoading(false));
+    adminApi.listPermissions().then(setPerms).catch(() => {}).finally(() => setLoading(false));
   };
 
   useEffect(() => { load(); }, []);
@@ -34,13 +34,13 @@ const PermissionsPage: FC = () => {
       if (editing) { await adminApi.updatePermission(editing.id, { code: formCode.trim(), name: formName.trim() }); message.success("权限已更新"); }
       else { await adminApi.createPermission({ code: formCode.trim(), name: formName.trim() }); message.success("权限已创建"); }
       setModalOpen(false); load();
-    } catch (e: any) { message.error(e?.response?.data?.detail || "保存失败"); }
+    } catch { /* ErrorToast */ }
     finally { setSaving(false); }
   };
 
   const remove = async (id: number) => {
     try { await adminApi.deletePermission(id); message.success("已删除"); load(); }
-    catch (e: any) { message.error(e?.response?.data?.detail || "删除失败"); }
+    catch { /* ErrorToast */ }
   };
 
   return (

@@ -44,13 +44,13 @@ const RolesPage: FC = () => {
     if (!formName.trim()) return message.warning("角色名不能为空");
     setSaving(true);
     try { await adminApi.createRole({ name: formName.trim(), description: formDesc.trim() || undefined }); message.success("角色已创建"); setCreateOpen(false); setFormName(""); setFormDesc(""); void load(); }
-    catch (e: any) { message.error(e?.response?.data?.detail || "创建失败"); }
+    catch { /* ErrorToast */ }
     finally { setSaving(false); }
   };
 
   const removeRole = async (id: number) => {
     try { await adminApi.deleteRole(id); message.success("已删除"); void load(); }
-    catch (e: any) { message.error(e?.response?.data?.detail || "删除失败"); }
+    catch { /* ErrorToast */ }
   };
 
   const hasWildcard = (role: RoleItem) => role.permissions.some((p) => p.code === "*");

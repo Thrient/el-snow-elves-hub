@@ -1,5 +1,4 @@
 import { api } from "@/api/axios";
-import { uploadFile } from "@/api/storage";
 import type { TaskItem, CommentItem, PageResult } from "@/types";
 
 export const taskApi = {
@@ -23,17 +22,12 @@ export const taskApi = {
   upload: (form: FormData) =>
     api.post("/api/v1/tasks", form),
 
-  createWithFileId: async (params: {
+  createWithFileId: (params: {
     title: string; description: string; category: string;
     tags: string; version: string; zip_file_id: number;
     filename?: string;
-    cover?: File;
+    cover_fingerprint_id?: number;
   }) => {
-    let coverFingerprintId: number | undefined;
-    if (params.cover) {
-      const up = await uploadFile(params.cover);
-      coverFingerprintId = up.fingerprint_id;
-    }
     const fd = new FormData();
     fd.append("title", params.title);
     fd.append("description", params.description);
@@ -42,7 +36,7 @@ export const taskApi = {
     fd.append("version", params.version);
     fd.append("zip_file_id", String(params.zip_file_id));
     if (params.filename) fd.append("filename", params.filename);
-    if (coverFingerprintId) fd.append("cover_fingerprint_id", String(coverFingerprintId));
+    if (params.cover_fingerprint_id) fd.append("cover_fingerprint_id", String(params.cover_fingerprint_id));
     return api.post("/api/v1/tasks", fd);
   },
 

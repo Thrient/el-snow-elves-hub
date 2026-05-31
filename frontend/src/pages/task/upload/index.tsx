@@ -14,6 +14,8 @@ const UploadPage: FC = () => {
   const navigate = useNavigate();
   const [file, setFile] = useState<File | null>(null);
   const [coverFile, setCoverFile] = useState<File | null>(null);
+  const [coverFingerprintId, setCoverFingerprintId] = useState<number | null>(null);
+  const [coverUploading, setCoverUploading] = useState(false);
   const [phase, setPhase] = useState<UploadPhase>("idle");
   const [progress, setProgress] = useState(0);
   const [uploadedBytes, setUploadedBytes] = useState(0);
@@ -31,10 +33,18 @@ const UploadPage: FC = () => {
       setFingerprintId(result.fingerprint_id);
       setUploadedBytes(f.size); setProgress(100);
       setPhase("complete");
-    } catch (err: any) {
-      message.error(err?.response?.data?.detail || err?.message || "上传失败");
+    } catch {
       setPhase("idle");
     }
+  };
+
+  const startCoverUpload = async (f: File) => {
+    setCoverFile(f); setCoverUploading(true);
+    try {
+      const result = await uploadFile(f);
+      setCoverFingerprintId(result.fingerprint_id);
+    } catch { setCoverFile(null); }
+    finally { setCoverUploading(false); }
   };
 
   const handleDrop = (e: DragEvent) => {
@@ -55,7 +65,7 @@ const UploadPage: FC = () => {
         category: "综合", tags: form.tags.trim(),
         version: form.version.trim() || "1.0.0",
         zip_file_id: fingerprintId, filename: file?.name,
-        cover: coverFile || undefined,
+        cover_fingerprint_id: coverFingerprintId || undefined,
       });
       message.success("发布成功"); navigate("/market");
     } catch { setPhase("complete"); }
@@ -127,11 +137,17 @@ const UploadPage: FC = () => {
               封面图 <span className="font-400 text-[#b8afa6]">（可选，建议 1280×720）</span>
             </div>
             <Upload accept="image/*" maxCount={1} showUploadList={false}
-              beforeUpload={(f) => { setCoverFile(f); return false; }}>
+              beforeUpload={(f) => { void startCoverUpload(f); return false; }}>
               <div className="flex items-center gap-2 py-2 px-4 rounded-2.5 border border-dashed border-[#d9cfc4] cursor-pointer transition-all duration-200 hover:border-[#d4513b] hover:bg-[#fef8f5]">
                 <PictureOutlined className="text-[#b8afa6]" />
                 <span className="text-[0.8125rem] text-[#6b5e55]">
-                  {coverFile ? <span className="text-[#22c55e]">{coverFile.name}</span> : "点击上传封面图"}
+                  {coverUploading ? <span className="text-[#faad14]">上传中...</span>
+                   : coverFingerprintId ? <>
+                       <span className="text-[#22c55e]">{coverFile?.name} ✓</span>
+                       <span onClick={(e) => { e.stopPropagation(); setCoverFile(null); setCoverFingerprintId(null); }}
+                         className="ml-2 text-[#b8afa6] cursor-pointer hover:text-[#d4513b]">× 移除</span>
+                     </>
+                   : "点击上传封面图"}
                 </span>
               </div>
             </Upload>
