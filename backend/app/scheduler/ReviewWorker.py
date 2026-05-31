@@ -20,21 +20,7 @@ OLLAMA_URL = "http://ollama:11434/api/chat"
 MODEL = "minicpm-v:8b"
 API_BASE = "http://localhost:8000/api/v1"
 
-REVIEW_PROMPT = """你是一个内容审核助手。检查内容是否包含以下违规：
-- 辱骂/人身攻击（包括拼音缩写如 sb/cnm/nmsl 等）
-- 色情/低俗内容
-- 政治敏感内容
-- 广告/垃圾信息
-
-**重要规则**：
-- 只有**明确违规**才回复 pass=false
-- 短文本/无意义字母/不确定的内容 → pass=true
-- "测试"/"test" 打头的内容是功能验证，不是垃圾广告 → pass=true
-
-严格回复 JSON：
-{"pass": true, "reason": "一句话"}
-
-内容：\n"""
+REVIEW_PROMPT = """仅当内容包含明确的人身攻击（包括拼音缩写如 sb/cnm/nmsl）、色情描写或政治敏感时拒绝（pass=false）。不确定/短文本/日常对话一律通过（pass=true）。回复 JSON：{"pass": true, "reason": "原因"}\n\n内容：\n"""
 
 _ai_user_id: int | None = None
 
