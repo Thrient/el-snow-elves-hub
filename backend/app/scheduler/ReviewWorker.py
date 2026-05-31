@@ -1,8 +1,11 @@
 """AI 审核 Worker — 消费 RabbitMQ → Ollama 审核 → 调管理 API 提交结果"""
 import asyncio
+import base64
+import io
 import json
 
 import httpx
+from PIL import Image
 from sqlalchemy import select
 
 from app.infrastructure.Database import async_session
@@ -49,8 +52,6 @@ async def ai_review_text(text: str, image_urls: list[str] | None = None) -> dict
                 try:
                     resp = await cli.get(url)
                     if resp.status_code == 200:
-                        import base64, io
-                        from PIL import Image
                         img = Image.open(io.BytesIO(resp.content))
                         img.thumbnail((512, 512))
                         buf = io.BytesIO()
@@ -80,12 +81,6 @@ async def ai_review_text(text: str, image_urls: list[str] | None = None) -> dict
             last_error = "network error"
         except Exception as e:
             last_error = str(e)[:100]
-            # 尝试获取实际响应内容以便调试
-            try:
-                body = resp.text[:200] if 'resp' in dir() else 'no response'
-                print(f"AI review attempt {attempt} failed: {e}, body={body}")
-            except Exception:
-                pass
         if attempt < 2:
             await asyncio.sleep(2)
     # 3 次重试都失败
