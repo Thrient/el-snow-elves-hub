@@ -317,6 +317,7 @@ async def update_task_status(
             content=f"你的任务「{t.title}」未通过审核：{reason}",
             link=f"/market/{t.id}",
         )
+        await db.commit()
 
     return {"ok": True}
 
@@ -389,6 +390,7 @@ async def review_post(
             content=f"你的{'帖子' if is_thread else '评论'}未通过审核：{reason}",
             link=f"/forum/post/{p.id}" if is_thread else f"/forum/post/{p.thread_id}",
         )
+        await db.commit()
 
     return {"ok": True}
 
@@ -418,6 +420,7 @@ async def review_comment(
             content=f"你的评论未通过审核：{reason}",
             link=f"/market/{c.task_id}",
         )
+        await db.commit()
 
     return {"ok": True}
 

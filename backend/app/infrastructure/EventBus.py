@@ -5,18 +5,18 @@ from typing import Callable, Awaitable
 import aio_pika
 from app.Config import settings
 
-_connection: aio_pika.RobustConnection | None = None
-_channel: aio_pika.RobustChannel | None = None
+_connection: aio_pika.Connection | None = None
+_channel: aio_pika.Channel | None = None
 
 EXCHANGE = "review.exchange"
 QUEUE = "review.queue"
 ROUTING_KEY = "review.new"
 
 
-async def _get_channel() -> aio_pika.RobustChannel:
+async def _get_channel() -> aio_pika.Channel:
     global _connection, _channel
     if _channel is None or _channel.is_closed:
-        _connection = await aio_pika.connect_robust(settings.rabbitmq_url)
+        _connection = await aio_pika.connect(settings.rabbitmq_url)
         _channel = await _connection.channel()
         exchange = await _channel.declare_exchange(
             EXCHANGE, aio_pika.ExchangeType.DIRECT, durable=True

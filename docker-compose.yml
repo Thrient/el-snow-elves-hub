@@ -1,26 +1,9 @@
 services:
-  rabbitmq:
-    image: rabbitmq:4-alpine
-    container_name: el-snow-hub-rabbitmq
-    ports:
-      - "5672:5672"
-      - "15672:15672"
-    environment:
-      RABBITMQ_DEFAULT_USER: elsnow
-      RABBITMQ_DEFAULT_PASS: MqPass2024!@#
-    volumes:
-      - rabbitmq_data:/var/lib/rabbitmq
-    networks:
-      - el-snow-hub
-    restart: unless-stopped
-
   backend:
     build: ./backend
     container_name: el-snow-hub-backend
     env_file:
       - ./backend/.env.prod
-    depends_on:
-      - rabbitmq
     networks:
       - el-snow-hub
     restart: unless-stopped
@@ -42,6 +25,3 @@ services:
 networks:
   el-snow-hub:
     external: true
-
-volumes:
-  rabbitmq_data:

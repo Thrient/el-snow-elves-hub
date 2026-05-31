@@ -1,4 +1,5 @@
 """AI 审核 Worker — 消费 RabbitMQ → Ollama 审核 → 调管理 API 提交结果"""
+import asyncio
 import json
 
 import httpx
@@ -156,8 +157,17 @@ async def _handle_message(data: dict):
 
 
 async def start_worker():
-    await consume_review(_handle_message)
-    print("AI review worker: started")
+    # RabbitMQ 容器可能还在启动，无限重试直到连上
+    backoff = 1
+    while True:
+        try:
+            await consume_review(_handle_message)
+            print("AI review worker: started")
+            return
+        except Exception as e:
+            print(f"AI review worker: waiting for RabbitMQ... ({e})")
+            await asyncio.sleep(backoff)
+            backoff = min(backoff * 2, 30)
 
 
 async def stop_worker():
