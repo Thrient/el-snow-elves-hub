@@ -24,20 +24,23 @@ const ForumBoardPage: FC = () => {
   const [loading, setLoading] = useState(true);
   const [searchText, setSearchText] = useState("");
 
+  const boardNum = Number(boardId);
+  const isValidBoard = boardId && !Number.isNaN(boardNum);
+
   const load = () => {
-    if (!boardId) return;
+    if (!isValidBoard) return;
     setLoading(true);
     Promise.all([
-      forumApi.listThreads(Number(boardId), page),
+      forumApi.listThreads(boardNum, page),
       forumApi.listBoards(),
     ]).then(([data, boards]) => {
       setThreads(data.items);
       setTotal(data.total);
-      setBoardName(boards.find((b) => b.id === Number(boardId))?.name || "");
+      setBoardName(boards.find((b) => b.id === boardNum)?.name || "");
     }).finally(() => setLoading(false));
   };
 
-  useEffect(() => { load(); }, [boardId, page]);
+  useEffect(() => { load(); }, [boardNum, page]);
 
   return (
     <div className="max-w-[55rem] mx-auto pt-8">
