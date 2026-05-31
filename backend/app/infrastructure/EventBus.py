@@ -1,10 +1,12 @@
 """RabbitMQ 事件总线 — 连接管理 + 发布/消费"""
+import asyncio
 import json
 from typing import Callable, Awaitable
 
 import aio_pika
 from app.Config import settings
 
+_lock = asyncio.Lock()
 _connection: aio_pika.Connection | None = None
 _channel: aio_pika.Channel | None = None
 
@@ -16,13 +18,16 @@ ROUTING_KEY = "review.new"
 async def _get_channel() -> aio_pika.Channel:
     global _connection, _channel
     if _channel is None or _channel.is_closed:
-        _connection = await aio_pika.connect(settings.rabbitmq_url)
-        _channel = await _connection.channel()
-        exchange = await _channel.declare_exchange(
-            EXCHANGE, aio_pika.ExchangeType.DIRECT, durable=True
-        )
-        queue = await _channel.declare_queue(QUEUE, durable=True)
-        await queue.bind(exchange, ROUTING_KEY)
+        async with _lock:
+            # 双重检查 — 锁内再次判断，避免重复创建
+            if _channel is None or _channel.is_closed:
+                _connection = await aio_pika.connect(settings.rabbitmq_url)
+                _channel = await _connection.channel()
+                exchange = await _channel.declare_exchange(
+                    EXCHANGE, aio_pika.ExchangeType.DIRECT, durable=True
+                )
+                queue = await _channel.declare_queue(QUEUE, durable=True)
+                await queue.bind(exchange, ROUTING_KEY)
     return _channel
 
 
@@ -38,17 +43,14 @@ async def publish_review(type_: str, item_id: int):
 
 
 async def consume_review(callback: Callable[[dict], Awaitable[None]]):
-    """消费者：注册回调，有新消息时调用 callback(data)"""
+    """消费者：注册回调。回调抛异常 → message nack 回队；正常返回 → ack"""
     channel = await _get_channel()
     queue = await channel.get_queue(QUEUE)
 
     async def on_message(message: aio_pika.IncomingMessage):
         async with message.process():
-            try:
-                data = json.loads(message.body.decode())
-                await callback(data)
-            except Exception as e:
-                print(f"EventBus consume error: {e}")
+            data = json.loads(message.body.decode())
+            await callback(data)
 
     await queue.consume(on_message)
 
