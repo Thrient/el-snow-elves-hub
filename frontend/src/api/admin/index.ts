@@ -62,7 +62,7 @@ export const adminApi = {
     if (reviewed !== undefined) params.reviewed = String(reviewed);
     return api.get<AdminPost[]>(`/api/v1/admin/posts`, { params });
   },
-  reviewPost: (id: number, data: { status?: string; reviewed?: boolean }) =>
+  reviewPost: (id: number, data: { status?: string; reviewed?: boolean; reason?: string }) =>
     api.put(`/api/v1/admin/posts/${id}/review`, data),
   deletePost: (id: number) => api.delete(`/api/v1/forum/threads/${id}`),
 

@@ -4,7 +4,7 @@ from sqlalchemy import delete, func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.infrastructure.Database import get_db
-from app.api.Deps import require_perm
+from app.api.Deps import get_current_user, require_perm
 from app.infrastructure.storage.StorageService import storage_service
 from app.identity.entity.User import User
 from app.release.entity.DownloadVersion import DownloadVersion
@@ -296,13 +296,28 @@ async def delete_version(version_id: int, db: AsyncSession = Depends(get_db)):
 
 @router.put("/tasks/{task_id}/status",
             dependencies=[Depends(require_perm("task:approve"))])
-async def update_task_status(task_id: int, body: TaskStatusUpdate, db: AsyncSession = Depends(get_db)):
+async def update_task_status(
+    task_id: int, body: TaskStatusUpdate,
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
     t = (await db.execute(select(TaskModel).where(TaskModel.id == task_id))).scalar_one_or_none()
     if not t:
         raise HTTPException(status_code=404, detail="任务不存在")
     t.status = body.status
     t.reviewed = True
     await db.commit()
+
+    if body.status == "rejected" and t.author_id:
+        from app.notification.Router import create_notification
+        reason = body.reason or "违反社区规范"
+        await create_notification(
+            db, receiver_id=t.author_id, sender_id=user.id,
+            type_="review_rejected",
+            content=f"你的任务「{t.title}」未通过审核：{reason}",
+            link=f"/market/{t.id}",
+        )
+
     return {"ok": True}
 
 
@@ -350,7 +365,11 @@ async def list_posts(
 
 @router.put("/posts/{post_id}/review",
             dependencies=[Depends(require_perm("forum:review"))])
-async def review_post(post_id: int, body: ReviewAction, db: AsyncSession = Depends(get_db)):
+async def review_post(
+    post_id: int, body: ReviewAction,
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
     p = (await db.execute(select(ForumPost).where(ForumPost.id == post_id))).scalar_one_or_none()
     if not p:
         raise HTTPException(404, "帖子不存在")
@@ -359,6 +378,47 @@ async def review_post(post_id: int, body: ReviewAction, db: AsyncSession = Depen
     if body.reviewed is not None:
         p.reviewed = body.reviewed
     await db.commit()
+
+    if body.status == "rejected" and p.author_id:
+        from app.notification.Router import create_notification
+        reason = body.reason or "违反社区规范"
+        is_thread = p.thread_id is None
+        await create_notification(
+            db, receiver_id=p.author_id, sender_id=user.id,
+            type_="review_rejected",
+            content=f"你的{'帖子' if is_thread else '评论'}未通过审核：{reason}",
+            link=f"/forum/post/{p.id}" if is_thread else f"/forum/post/{p.thread_id}",
+        )
+
+    return {"ok": True}
+
+
+@router.put("/comments/{comment_id}/review",
+            dependencies=[Depends(require_perm("forum:review"))])
+async def review_comment(
+    comment_id: int, body: ReviewAction,
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    c = (await db.execute(select(Comment).where(Comment.id == comment_id))).scalar_one_or_none()
+    if not c:
+        raise HTTPException(404, "评论不存在")
+    if body.status is not None:
+        c.status = body.status
+    if body.reviewed is not None:
+        c.reviewed = body.reviewed
+    await db.commit()
+
+    if body.status == "rejected" and c.user_id:
+        from app.notification.Router import create_notification
+        reason = body.reason or "违反社区规范"
+        await create_notification(
+            db, receiver_id=c.user_id, sender_id=user.id,
+            type_="review_rejected",
+            content=f"你的评论未通过审核：{reason}",
+            link=f"/market/{c.task_id}",
+        )
+
     return {"ok": True}
 
 

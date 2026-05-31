@@ -1,5 +1,5 @@
 import { useEffect, useState, type FC } from "react";
-import { Table, Button, Tag, Modal, Descriptions, Select, Space, Tabs, Popconfirm, message } from "antd";
+import { Table, Button, Tag, Modal, Descriptions, Select, Space, Tabs, Popconfirm, message, Input } from "antd";
 import { EyeOutlined, DeleteOutlined } from "@ant-design/icons";
 import { adminApi } from "@/api/admin";
 import type { AdminPost } from "@/types";
@@ -15,6 +15,9 @@ const AdminPostsPage: FC = () => {
   const [detail, setDetail] = useState<AdminPost | null>(null);
   const [filter, setFilter] = useState<"unreviewed" | "all">("unreviewed");
   const [type, setType] = useState<"threads" | "replies">("threads");
+  const [rejectTarget, setRejectTarget] = useState<{ open: boolean; id: number; reason: string }>({
+    open: false, id: 0, reason: "",
+  });
 
   const load = () => {
     setLoading(true);
@@ -23,9 +26,9 @@ const AdminPostsPage: FC = () => {
   };
   useEffect(() => { load(); }, [filter, type]);
 
-  const review = async (id: number, status: string) => {
+  const review = async (id: number, status: string, reason?: string) => {
     try {
-      await adminApi.reviewPost(id, { status, reviewed: true });
+      await adminApi.reviewPost(id, { status, reviewed: true, reason });
       message.success(status === "rejected" ? "已拒绝" : "已审核");
       load();
     } catch { /* ErrorToast */ }
@@ -78,7 +81,7 @@ const AdminPostsPage: FC = () => {
                 ) : (
                   <>
                     <Button size="small" type="primary" onClick={() => review(record.id, "approved")}>通过</Button>
-                    <Button size="small" danger onClick={() => review(record.id, "rejected")}>拒绝</Button>
+                    <Button size="small" danger onClick={() => setRejectTarget({ open: true, id: record.id, reason: "" })}>拒绝</Button>
                     <Popconfirm title="确定删除?" onConfirm={() => remove(record.id)}>
                       <Button size="small" type="text" danger icon={<DeleteOutlined />} />
                     </Popconfirm>
@@ -88,6 +91,24 @@ const AdminPostsPage: FC = () => {
             ),
           },
         ]} />
+      <Modal
+        title="拒绝原因"
+        open={rejectTarget.open}
+        onOk={async () => {
+          await review(rejectTarget.id, "rejected", rejectTarget.reason);
+          setRejectTarget({ open: false, id: 0, reason: "" });
+        }}
+        onCancel={() => setRejectTarget({ open: false, id: 0, reason: "" })}
+        okText="确认拒绝"
+        okButtonProps={{ danger: true }}
+      >
+        <Input.TextArea
+          placeholder="请输入拒绝原因（将通知用户）"
+          value={rejectTarget.reason}
+          onChange={(e) => setRejectTarget(prev => ({ ...prev, reason: e.target.value }))}
+          rows={3}
+        />
+      </Modal>
       <Modal title={detail?.title || "详情"} open={!!detail} onCancel={() => setDetail(null)} footer={null} width={640}>
         {detail && (
           <Descriptions column={1} size="small">
