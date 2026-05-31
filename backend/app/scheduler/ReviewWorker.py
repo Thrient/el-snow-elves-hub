@@ -9,7 +9,7 @@ from PIL import Image
 from sqlalchemy import select
 
 from app.infrastructure.Database import async_session
-from app.infrastructure.EventBus import consume_review
+from app.infrastructure.EventBus import close_bus, consume_review, publish_review
 from app.infrastructure.security.Token import create_access_token
 from app.infrastructure.storage.StorageService import storage_service
 from app.infrastructure.storage.entity.FileRecord import FileRecord
@@ -173,7 +173,6 @@ async def _handle_message(data: dict):
 
 async def _catch_up_unreviewed():
     """一次性扫描：把漏审的内容重新入队"""
-    from app.infrastructure.EventBus import publish_review
     async with async_session() as db:
         # 帖子 + 回复
         posts = (await db.execute(
@@ -215,6 +214,5 @@ async def start_worker():
 
 
 async def stop_worker():
-    from app.infrastructure.EventBus import close_bus
     await close_bus()
     print("AI review worker: stopped")

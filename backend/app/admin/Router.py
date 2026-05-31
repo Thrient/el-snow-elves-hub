@@ -18,6 +18,7 @@ from app.task.entity.DownloadRecord import DownloadRecord
 from app.task.entity.TaskView import TaskView
 from app.forum.entity.ForumPost import ForumPost
 from app.notification.entity.Notification import Notification
+from app.notification.Router import create_notification
 from app.infrastructure.rbac.entity.Role import Role as RoleModel
 from app.infrastructure.rbac.entity.Permission import Permission as PermissionModel
 from app.infrastructure.rbac.entity.RolePermission import RolePermission
@@ -308,7 +309,6 @@ async def update_task_status(
     t.reviewed = True
 
     if body.status == "rejected" and t.author_id:
-        from app.notification.Router import create_notification
         reason = body.reason or "违反社区规范"
         await create_notification(
             db, receiver_id=t.author_id, sender_id=user.id,
@@ -379,7 +379,6 @@ async def review_post(
         p.reviewed = body.reviewed
 
     if body.status == "rejected" and p.author_id:
-        from app.notification.Router import create_notification
         reason = body.reason or "违反社区规范"
         is_thread = p.thread_id is None
         await create_notification(
@@ -409,7 +408,6 @@ async def review_comment(
         c.reviewed = body.reviewed
 
     if body.status == "rejected" and c.user_id:
-        from app.notification.Router import create_notification
         reason = body.reason or "违反社区规范"
         await create_notification(
             db, receiver_id=c.user_id, sender_id=user.id,

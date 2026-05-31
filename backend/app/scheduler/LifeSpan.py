@@ -17,7 +17,8 @@ async def lifespan(app: FastAPI):
 
     await start_worker()
 
-    yield
-
-    await stop_worker()
-    scheduler.shutdown()
+    try:
+        yield
+    finally:
+        await stop_worker()
+        scheduler.shutdown()
