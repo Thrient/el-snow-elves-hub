@@ -1,6 +1,6 @@
 """用户实体 — 身份认证 + RBAC 角色关联"""
 from __future__ import annotations
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timezone
 
 from sqlalchemy import Boolean, DateTime, ForeignKey, Integer, String, func
 from sqlalchemy.orm import Mapped, mapped_column, relationship
@@ -8,9 +8,6 @@ from sqlalchemy.orm import Mapped, mapped_column, relationship
 from app.infrastructure.Database import Base
 from app.infrastructure.rbac.entity.Role import Role
 from app.infrastructure.storage.entity.FileRecord import FileRecord
-
-MAX_FAILED_LOGINS = 5
-LOCKOUT_DURATION = timedelta(minutes=15)
 
 
 class User(Base):
@@ -23,10 +20,9 @@ class User(Base):
     avatar_record_id: Mapped[int | None] = mapped_column(
         ForeignKey("file_records.id"), nullable=True, comment="头像上传记录"
     )
-    failed_login_attempts: Mapped[int] = mapped_column(Integer, default=0)
-    locked_until: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     token_version: Mapped[int] = mapped_column(Integer, default=0)
     is_disabled: Mapped[bool] = mapped_column(Boolean, default=False, server_default="0")
+    email_verified: Mapped[bool] = mapped_column(Boolean, default=False, server_default="0")
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
@@ -48,10 +44,18 @@ class User(Base):
 
     @property
     def avatar_url(self) -> str | None:
+        if not self.avatar_record or not self.avatar_record.fingerprint:
+            return None
+        from app.infrastructure.Redis import get_redis
+        r = get_redis()
+        key = f"avatar:{self.avatar_record.fingerprint.id}"
+        cached = r.get(key)
+        if cached:
+            return cached
         from app.infrastructure.storage.StorageService import storage_service
-        return storage_service.url(
-            self.avatar_record.fingerprint if self.avatar_record else None
-        )
+        url = storage_service.url(self.avatar_record.fingerprint)
+        r.setex(key, 3300, url)  # 55min, MinIO 签名 1h
+        return url
 
     @property
     def role_ids(self) -> list[int]:

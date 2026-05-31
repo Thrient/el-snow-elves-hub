@@ -4,13 +4,13 @@ import math
 from datetime import datetime, timedelta, timezone
 from urllib.parse import quote
 
-from fastapi import APIRouter, Depends, HTTPException, Query, Request, UploadFile, Form
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, Form
 from fastapi.responses import StreamingResponse
 from sqlalchemy import select, func, and_, or_, desc
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.infrastructure.Database import get_db
-from app.api.Deps import get_current_user, get_data_scope, get_optional_user, require_perm_any
+from app.api.Deps import get_current_user, get_data_scope, require_owner, get_optional_user, require_perm_any, require_verified
 from app.infrastructure.Response import ok, fail
 from app.task.entity.Task import Task
 from app.task.entity.Comment import Comment as CommentModel
@@ -25,7 +25,6 @@ from app.infrastructure.storage.entity.Fingerprint import Fingerprint
 from app.infrastructure.storage.entity.FileRecord import FileRecord
 from app.infrastructure.storage.StorageService import storage_service
 from app.infrastructure.storage.MinioClient import client as minio
-from app.infrastructure.storage.FileValidator import validate_file_size, validate_zip, validate_image
 
 router = APIRouter(prefix="/tasks", tags=["任务市场"])
 
@@ -78,11 +77,18 @@ def _has_recent(records, user_id: int | None, ip: str) -> bool:
 async def list_tasks(
     page: int = Query(1, ge=1), size: int = Query(20, ge=1, le=50),
     search: str = Query(""), category: str = Query(""), sort: str = Query("latest"),
+    status: str = Query(""),
     db: AsyncSession = Depends(get_db),
     user: User | None = Depends(get_optional_user),
     _=Depends(require_perm_any("task:list")),
 ):
-    q = select(Task).where(Task.status == "approved")
+    scope = await get_data_scope(user)
+    if scope == "all":
+        q = select(Task)
+        if status:
+            q = q.where(Task.status == status)
+    else:
+        q = select(Task).where(Task.status == "approved")
     if search:
         q = q.where(Task.title.contains(search))
     if category:
@@ -104,7 +110,7 @@ async def list_tasks(
 @router.get("/rankings/list")
 async def rankings(
     period: str = Query("all"), db: AsyncSession = Depends(get_db),
-    _=Depends(require_perm_any("task:list")),
+    _=Depends(require_perm_any("task:rankings")),
 ):
     q = select(Task).where(Task.status == "approved")
     if period == "week":
@@ -122,7 +128,7 @@ async def rankings(
 async def list_user_tasks(
     user_id: int, db: AsyncSession = Depends(get_db),
     user: User | None = Depends(get_optional_user),
-    _=Depends(require_perm_any("task:list")),
+    _=Depends(require_perm_any("task:user")),
 ):
     result = await db.execute(
         select(Task).where(and_(Task.author_id == user_id, Task.status == "approved"))
@@ -139,7 +145,7 @@ async def get_task(
     task_id: int, db: AsyncSession = Depends(get_db),
     user: User | None = Depends(get_optional_user),
     request: Request = None,
-    _=Depends(require_perm_any("task:list")),
+    _=Depends(require_perm_any("task:view")),
 ):
     t = (await db.execute(select(Task).where(Task.id == task_id))).scalar_one_or_none()
     if not t:
@@ -203,15 +209,13 @@ async def download_task(
 async def delete_task(
     task_id: int, user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
-    _=Depends(require_perm_any("task:delete")),
+    _=Depends(require_perm_any("task:delete")), _v=Depends(require_verified),
 ):
     task = (await db.execute(select(Task).where(Task.id == task_id))).scalar_one_or_none()
     if not task:
         raise HTTPException(404, "任务不存在")
 
-    scope = await get_data_scope(user)
-    if scope == "self" and task.author_id != user.id:
-        raise HTTPException(403, "只能删除自己的任务")
+    await require_owner(task, user)
 
     for record_id in (task.file_record_id, task.cover_record_id):
         if record_id:
@@ -239,6 +243,7 @@ async def toggle_like(
     task_id: int, user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
     _=Depends(require_perm_any("task:like")),
+    _v=Depends(require_verified),
 ):
     t = (await db.execute(select(Task).where(Task.id == task_id))).scalar_one_or_none()
     if not t:
@@ -262,19 +267,25 @@ async def toggle_like(
 @router.get("/{task_id}/comments")
 async def list_comments(
     task_id: int, db: AsyncSession = Depends(get_db),
-    _=Depends(require_perm_any("task:list")),
+    _=Depends(require_perm_any("task:comments")),
 ):
     result = await db.execute(
         select(CommentModel).where(CommentModel.task_id == task_id).order_by(CommentModel.created_at)
     )
-    comments = []
-    for c in result.scalars().all():
-        author = (await db.execute(select(User).where(User.id == c.user_id))).scalar_one_or_none()
-        comments.append(CommentOut(
+    comment_list = list(result.scalars().all())
+    user_ids = {c.user_id for c in comment_list}
+    users = {}
+    if user_ids:
+        rows = (await db.execute(select(User).where(User.id.in_(user_ids)))).scalars().all()
+        users = {u.id: u.username for u in rows}
+    comments = [
+        CommentOut(
             id=c.id, task_id=c.task_id, user_id=c.user_id,
-            user_name=author.username if author else "",
+            user_name=users.get(c.user_id, ""),
             content=c.content, parent_id=c.parent_id, created_at=c.created_at,
-        ))
+        )
+        for c in comment_list
+    ]
     return ok(comments)
 
 
@@ -319,54 +330,44 @@ async def delete_comment(
 
 @router.post("", status_code=201)
 async def create_task(
+    request: Request,
     title: str = Form(...), description: str = Form(""),
     category: str = Form("综合"), tags: str = Form(""),
     version: str = Form("1.0"), filename: str = Form(""),
-    file: UploadFile | None = None, zip_file_id: int | None = Form(None),
-    cover: UploadFile | None = None,
+    zip_file_id: int = Form(..., alias="zip_file_id"),
+    cover_fingerprint_id: int | None = Form(None),
     user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
     _=Depends(require_perm_any("task:create")),
 ):
-    file_record = None
-    if zip_file_id:
-        # zip_file_id is fingerprint_id — look up fingerprint, create FileRecord
-        fp = (await db.execute(
-            select(Fingerprint).where(Fingerprint.id == zip_file_id)
-        )).scalar_one_or_none()
-        if not fp:
-            raise HTTPException(400, "文件指纹不存在")
-        file_record = await storage_service.create_record(
-            db, fp, filename=filename or "task.zip",
-            content_type="application/zip", uploaded_by=user.id,
-        )
-        await db.flush()
-    elif file and file.filename:
-        validate_file_size(file)
-        zip_data = await file.read()
-        validate_zip(zip_data)
-        fp = await storage_service.store(db, zip_data, file.content_type or "application/zip")
-        await db.flush()
-        file_record = await storage_service.create_record(
-            db, fp,
-            filename=filename or file.filename or "task.zip",
-            content_type=file.content_type or "application/zip",
-            uploaded_by=user.id,
-        )
-    else:
-        raise HTTPException(400, "请上传 ZIP 文件")
+    if "multipart/form-data" not in (request.headers.get("content-type") or ""):
+        raise HTTPException(415, "请使用 multipart/form-data 上传")
+
+    fp = (await db.execute(
+        select(Fingerprint).where(Fingerprint.id == zip_file_id)
+    )).scalar_one_or_none()
+    if not fp:
+        raise HTTPException(400, "文件指纹不存在")
+    if fp.detected_type and fp.detected_type != "zip":
+        raise HTTPException(400, "仅支持 ZIP 文件")
+    file_record = await storage_service.create_record(
+        db, fp, filename=filename or "task.zip",
+        uploaded_by=user.id,
+    )
+    await db.flush()
 
     cover_record = None
-    if cover and cover.filename:
-        validate_file_size(cover)
-        cover_data = await cover.read()
-        validate_image(cover_data)
-        fp = await storage_service.store(db, cover_data, cover.content_type or "image/png")
-        await db.flush()
+    if cover_fingerprint_id:
+        cfp = (await db.execute(
+            select(Fingerprint).where(Fingerprint.id == cover_fingerprint_id)
+        )).scalar_one_or_none()
+        if not cfp:
+            raise HTTPException(400, "封面指纹不存在")
+        if cfp.detected_type and cfp.detected_type not in ("png", "jpeg", "gif"):
+            raise HTTPException(400, "封面仅支持 PNG / JPEG / GIF 图片")
         cover_record = await storage_service.create_record(
-            db, fp,
-            filename=cover.filename,
-            content_type=cover.content_type or "image/png",
+            db, cfp,
+            filename="cover.png",
             uploaded_by=user.id,
         )
 

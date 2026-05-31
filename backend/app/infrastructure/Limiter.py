@@ -8,7 +8,9 @@ _limiter: Limiter | None = None
 
 
 def _create_limiter() -> Limiter:
-    return Limiter(key_func=get_remote_address, default_limits=[settings.rate_limit_default])
+    return Limiter(key_func=get_remote_address,
+                   default_limits=[settings.rate_limit_default],
+                   storage_uri=settings.redis_url)
 
 
 # 惰性：首次访问时创建。auth.py 等模块导入时不会触发。

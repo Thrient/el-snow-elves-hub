@@ -8,6 +8,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.infrastructure.storage.entity.Upload import Upload
 from app.infrastructure.storage.MinioClient import client as minio
 from app.infrastructure.storage.StorageService import storage_service
+from app.infrastructure.storage.FileValidator import detect_type
 
 
 class ChunkedUpload:
@@ -55,6 +56,7 @@ class ChunkedUpload:
             buf.write(data)
 
         fp = await storage_service.store(db, buf.getvalue())
+        fp.detected_type = detect_type(buf.getvalue())
 
         for n in chunks:
             try:

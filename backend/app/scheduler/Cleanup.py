@@ -1,7 +1,11 @@
 """定时任务 — 过期上传清理 + 孤儿指纹清理"""
+import logging
+
 from app.infrastructure.Database import async_session
 from app.infrastructure.storage.ChunkedUpload import chunked_upload
 from app.scheduler.FingerprintCleanup import reconcile_and_cleanup
+
+logger = logging.getLogger("scheduler")
 
 
 async def daily_cleanup():
@@ -10,9 +14,9 @@ async def daily_cleanup():
         async with async_session() as db:
             count = await chunked_upload.cleanup_expired(db)
             if count:
-                print(f"[定时清理] 清理了 {count} 个过期上传")
-    except Exception as e:
-        print(f"[定时清理] 失败: {e}")
+                logger.info(f"清理了 {count} 个过期上传")
+    except Exception:
+        logger.exception("定时清理失败")
 
 
 async def daily_fingerprint_cleanup():
@@ -21,6 +25,6 @@ async def daily_fingerprint_cleanup():
         async with async_session() as db:
             count = await reconcile_and_cleanup(db)
             if count:
-                print(f"[指纹清理] 清理了 {count} 个孤儿指纹")
-    except Exception as e:
-        print(f"[指纹清理] 失败: {e}")
+                logger.info(f"清理了 {count} 个孤儿指纹")
+    except Exception:
+        logger.exception("指纹清理失败")

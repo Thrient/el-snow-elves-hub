@@ -34,6 +34,7 @@ export interface ReplyItem {
   parent_author: string | null;
   parent_content: string | null;
   image_urls: string[];
+  liked: boolean;
   like_count: number;
   created_at: string;
   updated_at: string | null;
@@ -42,6 +43,7 @@ export interface ReplyItem {
 export interface ThreadDetail extends ThreadItem {
   board_id: number;
   board_name: string;
+  liked: boolean;
   like_count: number;
   updated_at: string;
   replies: ReplyItem[];

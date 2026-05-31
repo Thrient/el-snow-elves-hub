@@ -17,11 +17,9 @@ const NotificationBell: FC = () => {
   // SSE 实时推送
   useEffect(() => {
     if (!user) { setUnreadCount(0); return; }
-    const token = localStorage.getItem("token");
-    if (!token) return;
 
     notificationApi.unreadCount().then(setUnreadCount);
-    const es = new EventSource(`/api/v1/notifications/stream?token=${encodeURIComponent(token)}`);
+    const es = new EventSource("/api/v1/notifications/stream");
     es.onmessage = (e) => {
       try {
         const n = JSON.parse(e.data);

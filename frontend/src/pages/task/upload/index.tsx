@@ -1,15 +1,14 @@
-import { useState, useRef, useCallback, type FC, type DragEvent } from "react";
+import { useState, type FC, type DragEvent } from "react";
 import { useNavigate } from "react-router-dom";
 import { Button, Input, Typography, Upload, message } from "antd";
 import { ArrowLeftOutlined, PictureOutlined } from "@ant-design/icons";
 import { taskApi } from "@/api/task";
-import { uploadApi, computeSHA256 } from "@/api/storage";
+import { uploadFile } from "@/api/storage";
 import StepIndicator from "./StepIndicator";
 import FileUploader from "./FileUploader";
 
 const { Title } = Typography;
-const CHUNK_SIZE = 5 * 1024 * 1024;
-type UploadPhase = "idle" | "hashing" | "checking" | "instant" | "uploading" | "complete" | "submitting";
+type UploadPhase = "idle" | "uploading" | "complete" | "submitting";
 
 const UploadPage: FC = () => {
   const navigate = useNavigate();
@@ -18,50 +17,20 @@ const UploadPage: FC = () => {
   const [phase, setPhase] = useState<UploadPhase>("idle");
   const [progress, setProgress] = useState(0);
   const [uploadedBytes, setUploadedBytes] = useState(0);
-  const [speed, setSpeed] = useState(0);
   const [fingerprintId, setFingerprintId] = useState<number | null>(null);
   const [dragOver, setDragOver] = useState(false);
   const [form, setForm] = useState({ title: "", description: "", tags: "", version: "1.0.0" });
-  const speedSamples = useRef<number[]>([]);
-
-  const updateSpeed = useCallback((bytesInChunk: number, ms: number) => {
-    if (ms <= 0) return;
-    const instantSpeed = (bytesInChunk / ms) * 1000;
-    speedSamples.current.push(instantSpeed);
-    if (speedSamples.current.length > 5) speedSamples.current.shift();
-    setSpeed(speedSamples.current.reduce((a, b) => a + b, 0) / speedSamples.current.length);
-  }, []);
 
   const startUpload = async (f: File) => {
-    setFile(f); setPhase("hashing"); setProgress(0); setUploadedBytes(0); setSpeed(0);
-    speedSamples.current = [];
+    setFile(f); setPhase("uploading"); setProgress(0); setUploadedBytes(0);
     try {
-      const sha256 = await computeSHA256(f, (pct) => setProgress(pct));
-      setPhase("checking");
-      const check = await uploadApi.check(sha256);
-      if (check.exists && check.fingerprint_id) {
-        setPhase("instant"); setFingerprintId(check.fingerprint_id);
-        setUploadedBytes(f.size); setProgress(100);
-        await new Promise((r) => setTimeout(r, 800));
-        setPhase("complete"); return;
-      }
-      const totalChunks = Math.ceil(f.size / CHUNK_SIZE);
-      const session = await uploadApi.init(f.name, f.size, totalChunks);
-      setPhase("uploading");
-      let totalUploaded = 0;
-      for (let i = 0; i < totalChunks; i++) {
-        const start = i * CHUNK_SIZE;
-        const blob = f.slice(start, Math.min(start + CHUNK_SIZE, f.size));
-        const t0 = performance.now();
-        await uploadApi.uploadChunk(session.upload_id, i, blob);
-        const elapsed = performance.now() - t0;
-        totalUploaded += blob.size;
-        setUploadedBytes(totalUploaded);
-        setProgress(Math.round((totalUploaded / f.size) * 100));
-        updateSpeed(blob.size, elapsed);
-      }
-      const result = await uploadApi.complete(session.upload_id);
-      setFingerprintId(result.fingerprint_id); setPhase("complete"); setProgress(100);
+      const result = await uploadFile(f, (pct) => {
+        setProgress(pct);
+        setUploadedBytes(Math.round(f.size * pct / 100));
+      });
+      setFingerprintId(result.fingerprint_id);
+      setUploadedBytes(f.size); setProgress(100);
+      setPhase("complete");
     } catch (err: any) {
       message.error(err?.response?.data?.detail || err?.message || "上传失败");
       setPhase("idle");
@@ -108,7 +77,7 @@ const UploadPage: FC = () => {
       <StepIndicator step={step} />
 
       <FileUploader phase={phase} file={file} progress={progress} uploadedBytes={uploadedBytes}
-        speed={speed} dragOver={dragOver}
+        speed={0} dragOver={dragOver}
         onDrop={handleDrop}
         onDragOver={(e) => { e.preventDefault(); setDragOver(true); }}
         onDragLeave={() => setDragOver(false)}

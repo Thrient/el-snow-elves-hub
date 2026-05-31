@@ -30,6 +30,7 @@ const ForumCreatePage: FC = () => {
     if (!boardId) return message.warning("请选择板块");
     if (!title.trim()) return message.warning("请输入标题");
     if (!content.trim()) return message.warning("请输入内容");
+    if (/[<>]/.test(title) || /[<>]/.test(content)) return message.warning("不能包含 HTML 标签");
     if (images.some((img) => img.uploading)) return message.warning("请等待图片上传完成");
     setSubmitting(true);
     try {

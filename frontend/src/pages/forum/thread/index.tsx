@@ -3,7 +3,7 @@ import { useParams, useNavigate } from "react-router-dom";
 import { Button, Spin, Input, message, Modal } from "antd";
 import { ArrowLeftOutlined, MessageOutlined } from "@ant-design/icons";
 import { forumApi } from "@/api/forum";
-import type { ThreadDetail } from "@/types";
+import type { ThreadDetail, ReplyItem } from "@/types";
 import { useAuthStore } from "@/store/auth";
 import PostDetail from "@/pages/forum/components/PostDetail";
 import ReplyCard from "@/pages/forum/components/ReplyCard";
@@ -24,7 +24,6 @@ const ForumThreadPage: FC = () => {
   const [editing, setEditing] = useState(false);
   const [editContent, setEditContent] = useState("");
   const [editId, setEditId] = useState<number | null>(null);
-  const [likedPosts, setLikedPosts] = useState<Set<number>>(new Set());
   const loadedRef = useRef<string | null>(null);
 
   const load = () => {
@@ -54,16 +53,22 @@ const ForumThreadPage: FC = () => {
         const results = await Promise.all(replyImages.map((f) => forumApi.uploadImage(f)));
         imgIds = results.map((r) => r.fingerprint_id);
       }
-      await forumApi.createReply(thread.id, replyText.trim(), replyingTo?.id, imgIds);
+      const res = await forumApi.createReply(thread.id, replyText.trim(), replyingTo?.id, imgIds);
+      const reply: ReplyItem = res.data;
       setReplyText(""); setReplyImages([]); setReplyingTo(null);
+      setThread((prev) => prev ? {
+        ...prev,
+        reply_count: prev.reply_count + 1,
+        replies: [...prev.replies, reply],
+      } : prev);
       message.success("回复成功");
-      loadedRef.current = null; load();
     } catch { message.error("回复失败"); }
     finally { setSubmitting(false); }
   };
 
   const handleEdit = async () => {
     if (!editId) return;
+    if (/[<>]/.test(editContent)) return message.warning("不能包含 HTML 标签");
     try {
       await forumApi.updateThread(editId, { content: editContent });
       message.success("已更新"); setEditing(false);
@@ -89,21 +94,17 @@ const ForumThreadPage: FC = () => {
     if (!user) { message.info("请先登录"); return; }
     try {
       const res = await forumApi.likePost(postId);
-      setLikedPosts((prev) => {
-        const next = new Set(prev);
-        if (res.data.liked) next.add(postId); else next.delete(postId);
-        return next;
-      });
-      if (thread) {
-        if (thread.id === postId) {
-          setThread({ ...thread, like_count: res.data.like_count });
-        } else {
-          setThread({
-            ...thread,
-            replies: thread.replies.map((r) => r.id === postId ? { ...r, like_count: res.data.like_count } : r),
-          });
+      const { liked, like_count } = res.data;
+      setThread((prev) => {
+        if (!prev) return prev;
+        if (prev.id === postId) {
+          return { ...prev, liked, like_count };
         }
-      }
+        return {
+          ...prev,
+          replies: prev.replies.map((r) => r.id === postId ? { ...r, liked, like_count } : r),
+        };
+      });
     } catch { message.error("操作失败"); }
   };
 
@@ -133,7 +134,7 @@ const ForumThreadPage: FC = () => {
       {/* OP */}
       <PostDetail
         thread={thread}
-        liked={likedPosts.has(thread.id)}
+        liked={thread.liked}
         canManage={canManage}
         isAuthor={isAuthor}
         onLike={() => handleLike(thread.id)}
@@ -158,7 +159,7 @@ const ForumThreadPage: FC = () => {
                 floorNum={idx + 2}
                 thread={thread}
                 userId={user?.id}
-                liked={likedPosts.has(r.id)}
+                liked={r.liked}
                 canManage={canManage}
                 onLike={() => handleLike(r.id)}
                 onReply={() => { setReplyingTo({ id: r.id, floor: idx + 2, author: r.author?.username || "匿名" }); setReplyText(""); }}
@@ -180,6 +181,8 @@ const ForumThreadPage: FC = () => {
         onReplyTextChange={setReplyText}
         onCancelReply={() => setReplyingTo(null)}
         onSubmit={handleReply}
+        images={replyImages}
+        onImagesChange={setReplyImages}
       />
 
       {/* Edit modal */}

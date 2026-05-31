@@ -21,9 +21,17 @@ async def check_file(
     db: AsyncSession = Depends(get_db),
     _=Depends(require_perm_any("file:check")),
 ):
-    fp = (await db.execute(
-        select(Fingerprint).where(Fingerprint.sha256 == body.sha256)
-    )).scalar_one_or_none()
-    if fp:
-        return ok({"exists": True, "fingerprint_id": fp.id})
-    return ok({"exists": False, "fingerprint_id": None})
+    hashes = body.get_list()
+    if not hashes:
+        return ok({"existing": [], "missing": []})
+    rows = (await db.execute(
+        select(Fingerprint.sha256, Fingerprint.id).where(Fingerprint.sha256.in_(hashes))
+    )).all()
+    existing = {row[0]: row[1] for row in rows}
+    if isinstance(body.sha256, str):
+        fp_id = existing.get(body.sha256)
+        return ok({"exists": fp_id is not None, "fingerprint_id": fp_id})
+    return ok({
+        "existing": [h for h in hashes if h in existing],
+        "missing": [h for h in hashes if h not in existing],
+    })

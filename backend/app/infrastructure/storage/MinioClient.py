@@ -31,11 +31,15 @@ class MinioClient:
 
     def get_url(self, key: str) -> str:
         """生成预签名下载链接，有效期 1 小时"""
-        return self._client.generate_presigned_url(
+        url = self._client.generate_presigned_url(
             "get_object",
             Params={"Bucket": self._bucket, "Key": key},
             ExpiresIn=3600,
         )
+        if settings.minio_public_endpoint:
+            internal = f"http{'s' if settings.minio_secure else ''}://{settings.minio_endpoint}"
+            url = url.replace(internal, settings.minio_public_endpoint)
+        return url
 
     def download(self, key: str) -> tuple[bytes, str]:
         """下载对象，返回 (内容, ContentType)"""

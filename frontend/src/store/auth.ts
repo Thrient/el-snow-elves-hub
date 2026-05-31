@@ -1,7 +1,5 @@
 import { create } from "zustand";
-import axios from "axios";
-
-const API = axios.create();
+import { api } from "@/api/axios";
 
 export interface AuthUser {
   id: number;
@@ -10,50 +8,29 @@ export interface AuthUser {
   avatar_url: string | null;
   role_names: string[];
   permissions: string[] | null;
+  email_verified: boolean;
 }
 
 interface AuthState {
   user: AuthUser | null;
-  token: string | null;
   loading: boolean;
 
   login: (email: string, password: string) => Promise<void>;
   register: (username: string, email: string, password: string) => Promise<void>;
-  logout: () => void;
-  loadFromStorage: () => void;
-  refreshToken: () => Promise<boolean>;
+  logout: () => Promise<void>;
+  validateSession: () => Promise<void>;
   hasPerm: (code: string) => boolean;
-}
-
-/** Call this when API returns 401 — tries to refresh, returns true if succeeded */
-export async function tryRefreshToken(): Promise<string | null> {
-  const refresh = localStorage.getItem("refresh_token");
-  if (!refresh) return null;
-  try {
-    const { data } = await axios.post("/api/v1/auth/refresh", { refresh_token: refresh });
-    localStorage.setItem("token", data.access_token);
-    localStorage.setItem("refresh_token", data.refresh_token);
-    localStorage.setItem("user", JSON.stringify(data.user));
-    useAuthStore.setState({ user: data.user, token: data.access_token });
-    return data.access_token;
-  } catch {
-    return null;
-  }
 }
 
 export const useAuthStore = create<AuthState>((set, get) => ({
   user: null,
-  token: null,
   loading: false,
 
   login: async (email, password) => {
     set({ loading: true });
     try {
-      const { data } = await API.post("/api/v1/auth/login", { email, password });
-      localStorage.setItem("token", data.access_token);
-      localStorage.setItem("refresh_token", data.refresh_token);
-      localStorage.setItem("user", JSON.stringify(data.user));
-      set({ user: data.user, token: data.access_token, loading: false });
+      const res = await api.post<{ code: number; data: AuthUser }>("/api/v1/auth/login", { email, password });
+      set({ user: res.data, loading: false });
     } catch {
       set({ loading: false });
       throw new Error("登录失败");
@@ -63,39 +40,26 @@ export const useAuthStore = create<AuthState>((set, get) => ({
   register: async (username, email, password) => {
     set({ loading: true });
     try {
-      const { data } = await API.post("/api/v1/auth/register", { username, email, password });
-      localStorage.setItem("token", data.access_token);
-      localStorage.setItem("refresh_token", data.refresh_token);
-      localStorage.setItem("user", JSON.stringify(data.user));
-      set({ user: data.user, token: data.access_token, loading: false });
+      await api.post("/api/v1/auth/register", { username, email, password });
+      set({ loading: false });
     } catch {
       set({ loading: false });
       throw new Error("注册失败");
     }
   },
 
-  logout: () => {
-    localStorage.removeItem("token");
-    localStorage.removeItem("refresh_token");
-    localStorage.removeItem("user");
-    set({ user: null, token: null });
+  logout: async () => {
+    try { await api.post("/api/v1/auth/logout"); } catch { /* ignore */ }
+    set({ user: null });
   },
 
-  loadFromStorage: () => {
-    const token = localStorage.getItem("token");
-    const raw = localStorage.getItem("user");
-    if (token && raw) {
-      try {
-        set({ user: JSON.parse(raw), token });
-      } catch {
-        localStorage.removeItem("user");
-      }
+  validateSession: async () => {
+    try {
+      const user = await api.get<AuthUser>("/api/v1/auth/me");
+      set({ user });
+    } catch {
+      set({ user: null });
     }
-  },
-
-  refreshToken: async () => {
-    const newToken = await tryRefreshToken();
-    return !!newToken;
   },
 
   hasPerm: (code: string) => {

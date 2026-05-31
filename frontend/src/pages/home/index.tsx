@@ -1,23 +1,33 @@
 import { useEffect, useState, type FC } from "react";
 import { useNavigate } from "react-router-dom";
-import { Button, Row, Col, Typography, Skeleton } from "antd";
+import { Button, Row, Col, Typography, Skeleton, Grid } from "antd";
 import { DownloadOutlined, AppstoreOutlined, UserOutlined, HeartOutlined, ArrowRightOutlined } from "@ant-design/icons";
 import { taskApi } from "@/api/task";
 import type { TaskItem } from "@/types";
 
 const { Title } = Typography;
+const { useBreakpoint } = Grid;
+
+const COLS: Array<[string, number]> = [["xxl", 6], ["xl", 4], ["lg", 3], ["md", 3], ["sm", 2], ["xs", 1]];
+const SPANS = Object.fromEntries(COLS.map(([k, v]) => [k, 24 / v]));
+const ROWS = 2;
 
 const HomePage: FC = () => {
   const navigate = useNavigate();
+  const screens = useBreakpoint();
   const [hotTasks, setHotTasks] = useState<TaskItem[]>([]);
   const [loading, setLoading] = useState(true);
 
+  const cols = COLS.find(([bp]) => (screens as Record<string, boolean>)[bp])?.[1] ?? 1;
+  const size = cols * ROWS;
+
   useEffect(() => {
-    taskApi.list({ sort: "downloads", size: 4 })
+    setLoading(true);
+    taskApi.list({ sort: "downloads", size })
       .then((r) => setHotTasks(r.items))
       .catch(() => {})
       .finally(() => setLoading(false));
-  }, []);
+  }, [size]);
 
   return (
     <div>
@@ -83,8 +93,8 @@ const HomePage: FC = () => {
 
         {loading ? (
           <Row gutter={[24, 24]}>
-            {[1, 2, 3, 4].map((i) => (
-              <Col key={i} xs={24} sm={12} md={6} xl={4} xxl={3}>
+            {[...Array(size)].map((_, i) => (
+              <Col key={i} {...SPANS}>
                 <Skeleton active paragraph={{ rows: 3 }} />
               </Col>
             ))}
@@ -92,7 +102,7 @@ const HomePage: FC = () => {
         ) : (
           <Row gutter={[24, 24]}>
             {hotTasks.map((task, idx) => (
-              <Col key={task.id} xs={24} sm={12} md={8} xl={6} xxl={4}>
+              <Col key={task.id} {...SPANS}>
                 <div
                   onClick={() => navigate(`/market/${task.id}`)}
                   className="overflow-hidden cursor-pointer bg-white border border-solid border-[#e8e0d5] card-hover"

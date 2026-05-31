@@ -32,7 +32,9 @@ class SseConnection:
             except asyncio.CancelledError:
                 pass
             finally:
-                self._on_disconnect()
+                result = self._on_disconnect()
+                if asyncio.iscoroutine(result):
+                    await result
 
         return StreamingResponse(
             generate(),

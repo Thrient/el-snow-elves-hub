@@ -3,10 +3,9 @@ from fastapi import APIRouter, Depends, File, HTTPException, UploadFile, status
 from sqlalchemy import delete, func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.infrastructure.Database import async_session, get_db
-from app.api.Deps import get_current_user, require_perm
+from app.infrastructure.Database import get_db
+from app.api.Deps import require_perm
 from app.infrastructure.storage.StorageService import storage_service
-from app.infrastructure.storage.FileValidator import validate_file_size
 from app.identity.entity.User import User
 from app.release.entity.DownloadVersion import DownloadVersion
 from app.release.entity.VersionFile import VersionFile
@@ -26,9 +25,11 @@ from app.infrastructure.rbac.entity.UserRole import UserRole
 from app.infrastructure.navigation.entity.Route import Route as RouteModel
 from app.admin.Schema.StatsResponse import StatsResponse
 from app.admin.Schema.UserItem import UserItem, UserRoleUpdate
-from app.admin.Schema.VersionCreate import VersionCreate, VersionItem
-from app.admin.Schema.BlobSchema import BlobCheckRequest, BlobCheckResponse, BlobUploadResponse
+from app.admin.Schema.VersionCreate import VersionCreate
 from app.admin.Schema.RbacSchema import PermCreate, PermUpdate, RoleCreate, RoleUpdate
+from app.admin.Schema.TaskStatusUpdate import TaskStatusUpdate
+from app.admin.Schema.RouteCreate import RouteCreate
+from app.admin.Schema.RouteUpdate import RouteUpdate
 
 router = APIRouter(prefix="/admin", tags=["管理后台"])
 
@@ -73,7 +74,7 @@ async def update_user_roles(user_id: int, body: UserRoleUpdate, db: AsyncSession
 
 
 @router.put("/users/{user_id}/disable",
-            dependencies=[Depends(require_perm("user:assign"))])
+            dependencies=[Depends(require_perm("user:disable"))])
 async def toggle_disable_user(user_id: int, db: AsyncSession = Depends(get_db)):
     user = (await db.execute(select(User).where(User.id == user_id))).scalar_one_or_none()
     if not user:
@@ -84,7 +85,7 @@ async def toggle_disable_user(user_id: int, db: AsyncSession = Depends(get_db)):
 
 
 @router.delete("/users/{user_id}",
-               dependencies=[Depends(require_perm("user:assign"))])
+               dependencies=[Depends(require_perm("user:delete"))])
 async def delete_user(user_id: int, db: AsyncSession = Depends(get_db)):
     user = (await db.execute(select(User).where(User.id == user_id))).scalar_one_or_none()
     if not user:
@@ -92,14 +93,7 @@ async def delete_user(user_id: int, db: AsyncSession = Depends(get_db)):
 
     from sqlalchemy import update as sql_update
 
-    user_post_ids = (
-        (await db.execute(select(ForumPost.id).where(ForumPost.author_id == user_id)))
-        .scalars().all()
-    )
-    if user_post_ids:
-        await db.execute(sql_update(ForumPost).where(ForumPost.parent_id.in_(user_post_ids)).values(parent_id=None))
-        await db.execute(sql_update(ForumPost).where(ForumPost.thread_id.in_(user_post_ids)).values(thread_id=None))
-        await db.execute(delete(ForumPost).where(ForumPost.author_id == user_id))
+    await db.execute(sql_update(ForumPost).where(ForumPost.author_id == user_id).values(author_id=None))
 
     await db.execute(delete(TaskLike).where(TaskLike.user_id == user_id))
     await db.execute(delete(Comment).where(Comment.user_id == user_id))
@@ -109,6 +103,7 @@ async def delete_user(user_id: int, db: AsyncSession = Depends(get_db)):
     await db.execute(sql_update(Notification).where(Notification.sender_id == user_id).values(sender_id=None))
     await db.execute(sql_update(DownloadRecord).where(DownloadRecord.user_id == user_id).values(user_id=None))
     await db.execute(sql_update(TaskView).where(TaskView.user_id == user_id).values(user_id=None))
+    await db.execute(sql_update(FileRecord).where(FileRecord.uploaded_by == user_id).values(uploaded_by=None))
 
     await db.flush()
     await db.delete(user)
@@ -131,7 +126,7 @@ async def list_roles(db: AsyncSession = Depends(get_db)):
 
 
 @router.put("/roles/{role_id}/permissions",
-            dependencies=[Depends(require_perm("role:update"))])
+            dependencies=[Depends(require_perm("role:permissions"))])
 async def update_role_permissions(role_id: int, body: PermUpdate, db: AsyncSession = Depends(get_db)):
     role = (await db.execute(select(RoleModel).where(RoleModel.id == role_id))).scalar_one_or_none()
     if not role:
@@ -240,64 +235,6 @@ async def delete_permission(perm_id: int, db: AsyncSession = Depends(get_db)):
     await db.commit()
     return {"ok": True}
 
-# ═══════════════════════════════════════════
-# Blobs
-# ═══════════════════════════════════════════
-
-@router.post("/blobs/check", response_model=BlobCheckResponse)
-async def check_blobs(body: BlobCheckRequest):
-    """秒传预检：返回哪些 SHA256 已存在"""
-    async with async_session() as db:
-        result = await db.execute(
-            select(Fingerprint.sha256).where(Fingerprint.sha256.in_(body.sha256_list))
-        )
-        existing = [row[0] for row in result.all()]
-        return BlobCheckResponse(
-            existing=existing,
-            missing=[h for h in body.sha256_list if h not in existing],
-        )
-
-
-@router.post("/blobs/upload", response_model=BlobUploadResponse)
-async def upload_blob(
-    file: UploadFile = File(...),
-    user: User = Depends(get_current_user),
-):
-    """上传单个文件 blob"""
-    validate_file_size(file)
-    data = await file.read()
-    async with async_session() as db:
-        fp = await storage_service.store(db, data)
-        await db.commit()
-        return {"fingerprint_id": fp.id, "sha256": fp.sha256, "size": fp.size}
-
-# ═══════════════════════════════════════════
-# Versions
-# ═══════════════════════════════════════════
-
-@router.get("/versions", response_model=list[VersionItem],
-            dependencies=[Depends(require_perm("version:list"))])
-async def list_versions(db: AsyncSession = Depends(get_db)):
-    result = await db.execute(
-        select(DownloadVersion, func.count(VersionFile.id).label("file_count"))
-        .outerjoin(VersionFile, VersionFile.version_id == DownloadVersion.id)
-        .group_by(DownloadVersion.id)
-        .order_by(DownloadVersion.created_at.desc())
-    )
-    rows = result.all()
-    items = []
-    for row in rows:
-        v = row[0]
-        fc = row[1]
-        items.append(VersionItem(
-            id=v.id, version=v.version, platform=v.platform,
-            changelog=v.changelog, is_latest=v.is_latest,
-            is_mandatory=v.is_mandatory, created_at=v.created_at,
-            file_count=fc,
-        ))
-    return items
-
-
 @router.post("/versions", status_code=status.HTTP_201_CREATED)
 async def create_version(body: VersionCreate, user: User = Depends(require_perm("version:create")), db: AsyncSession = Depends(get_db)):
     if body.is_latest:
@@ -312,21 +249,24 @@ async def create_version(body: VersionCreate, user: User = Depends(require_perm(
     db.add(v)
     await db.flush()
 
+    sha256s = [f.sha256 for f in body.files]
+    fp_rows = (await db.execute(select(Fingerprint).where(Fingerprint.sha256.in_(sha256s)))).scalars().all()
+    fp_map = {fp.sha256: fp for fp in fp_rows}
+    fp_ids = [fp.id for fp in fp_rows]
+    rec_rows = (await db.execute(select(FileRecord).where(FileRecord.fingerprint_id.in_(fp_ids)))).scalars().all()
+    rec_map = {r.fingerprint_id: r for r in rec_rows}
     for f_entry in body.files:
-        fp = (await db.execute(
-            select(Fingerprint).where(Fingerprint.sha256 == f_entry.sha256)
-        )).scalar_one_or_none()
+        fp = fp_map.get(f_entry.sha256)
         if not fp:
             raise HTTPException(400, f"blob not found: {f_entry.sha256}")
-        record = (await db.execute(
-            select(FileRecord).where(FileRecord.fingerprint_id == fp.id)
-        )).scalar_one_or_none()
+        record = rec_map.get(fp.id)
         if not record:
             record = await storage_service.create_record(
                 db, fp, filename=f_entry.path.split('/').pop() or "blob",
-                content_type="application/octet-stream", uploaded_by=user.id,
+                uploaded_by=user.id,
             )
             await db.flush()
+            rec_map[fp.id] = record
         db.add(VersionFile(
             version_id=v.id,
             relative_path=f_entry.path,
@@ -353,47 +293,22 @@ async def delete_version(version_id: int, db: AsyncSession = Depends(get_db)):
 # Tasks
 # ═══════════════════════════════════════════
 
-@router.get("/tasks", dependencies=[Depends(require_perm("task:list"))])
-async def list_all_tasks(db: AsyncSession = Depends(get_db)):
-    result = await db.execute(select(TaskModel).order_by(TaskModel.created_at.desc()))
-    return [
-        {
-            "id": t.id, "title": t.title, "author_id": t.author_id,
-            "category": t.category, "version": t.version, "status": t.status,
-            "download_count": t.download_count, "like_count": t.like_count,
-            "created_at": t.created_at.isoformat(),
-        }
-        for t in result.scalars().all()
-    ]
-
-
 @router.put("/tasks/{task_id}/status",
             dependencies=[Depends(require_perm("task:approve"))])
-async def update_task_status(task_id: int, body: dict, db: AsyncSession = Depends(get_db)):
+async def update_task_status(task_id: int, body: TaskStatusUpdate, db: AsyncSession = Depends(get_db)):
     t = (await db.execute(select(TaskModel).where(TaskModel.id == task_id))).scalar_one_or_none()
     if not t:
         raise HTTPException(status_code=404, detail="任务不存在")
-    if "status" in body:
-        t.status = body["status"]
+    t.status = body.status
     await db.commit()
     return {"ok": True}
 
-
-@router.delete("/tasks/{task_id}",
-               dependencies=[Depends(require_perm("task:delete"))])
-async def delete_task(task_id: int, db: AsyncSession = Depends(get_db)):
-    t = (await db.execute(select(TaskModel).where(TaskModel.id == task_id))).scalar_one_or_none()
-    if not t:
-        raise HTTPException(status_code=404, detail="任务不存在")
-    await db.delete(t)
-    await db.commit()
-    return {"ok": True}
 
 # ═══════════════════════════════════════════
 # Routes
 # ═══════════════════════════════════════════
 
-@router.get("/routes", dependencies=[Depends(require_perm("route:list"))])
+@router.get("/routes", dependencies=[Depends(require_perm("admin:routes"))])
 async def list_routes(db: AsyncSession = Depends(get_db)):
     result = await db.execute(select(RouteModel).order_by(RouteModel.sort_order))
     return [
@@ -409,19 +324,19 @@ async def list_routes(db: AsyncSession = Depends(get_db)):
 
 @router.post("/routes", status_code=status.HTTP_201_CREATED,
              dependencies=[Depends(require_perm("route:create"))])
-async def create_route(body: dict, db: AsyncSession = Depends(get_db)):
+async def create_route(body: RouteCreate, db: AsyncSession = Depends(get_db)):
     existing = (await db.execute(
-        select(RouteModel).where(RouteModel.path == body["path"])
+        select(RouteModel).where(RouteModel.path == body.path)
     )).scalar_one_or_none()
     if existing:
         raise HTTPException(status_code=400, detail="路由路径已存在")
-    if body.get("parent_id") is not None:
+    if body.parent_id is not None:
         parent = (await db.execute(
-            select(RouteModel).where(RouteModel.id == body["parent_id"])
+            select(RouteModel).where(RouteModel.id == body.parent_id)
         )).scalar_one_or_none()
         if not parent:
             raise HTTPException(status_code=400, detail="父级路由不存在")
-    route = RouteModel(**body)
+    route = RouteModel(**body.model_dump())
     db.add(route)
     await db.commit()
     await db.refresh(route)
@@ -430,13 +345,13 @@ async def create_route(body: dict, db: AsyncSession = Depends(get_db)):
 
 @router.put("/routes/{route_id}",
             dependencies=[Depends(require_perm("route:update"))])
-async def update_route(route_id: int, body: dict, db: AsyncSession = Depends(get_db)):
+async def update_route(route_id: int, body: RouteUpdate, db: AsyncSession = Depends(get_db)):
     route = (await db.execute(
         select(RouteModel).where(RouteModel.id == route_id)
     )).scalar_one_or_none()
     if not route:
         raise HTTPException(status_code=404, detail="路由不存在")
-    for field, value in body.items():
+    for field, value in body.model_dump(exclude_none=True).items():
         setattr(route, field, value)
     await db.commit()
     return {"ok": True}
@@ -474,25 +389,17 @@ async def toggle_route(route_id: int, body: dict, db: AsyncSession = Depends(get
 import asyncio
 import json
 
-from fastapi import Query
-from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
+from fastapi import Request as FastAPIRequest
 from app.infrastructure.security.Token import decode_access_token
 from app.infrastructure.sse.OnlineTracker import admin_queues_list, counts, _lock as tracker_lock
 from app.infrastructure.sse.SseConnection import SseConnection
 
-security = HTTPBearer(auto_error=False)
-
 
 async def get_admin_user(
-    token: str | None = Query(None),
-    credentials: HTTPAuthorizationCredentials | None = Depends(security),
+    request: FastAPIRequest,
     db_admin: AsyncSession = Depends(get_db),
 ) -> User:
-    jwt = None
-    if credentials:
-        jwt = credentials.credentials
-    elif token:
-        jwt = token
+    jwt = request.cookies.get("access_token")
 
     if not jwt:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="需要登录")

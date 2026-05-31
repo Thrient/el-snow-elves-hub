@@ -33,25 +33,48 @@ PERMISSION_CODES = {
     "page:admin-routes": "查看路由管理",
     "dashboard:view": "查看仪表盘数据",
     "public:ping": "健康检查",
+    "client:stream": "客户端推送",
     "auth:login": "登录",
     "auth:register": "注册",
     "auth:refresh": "刷新令牌",
+    "auth:verify": "验证邮箱链接",
+    "auth:send-verify": "免登录重发验证",
+    "auth:resend-verify": "登录后重发验证",
     "file:check": "文件指纹校验",
-    "file:upload": "上传文件",
+    "file:upload:init": "上传初始化",
+    "file:upload:chunk": "上传分片",
+    "file:upload:complete": "上传完成",
     "task:list": "查看任务列表",
+    "task:rankings": "查看排行榜",
+    "task:user": "查看用户任务",
+    "task:view": "查看任务详情",
+    "task:comments": "查看任务评论",
     "task:download": "下载任务",
     "task:create": "创建任务",
     "task:like": "点赞任务",
     "task:comment": "发表评论",
     "task:approve": "审核任务",
     "task:delete": "删除任务",
-    "forum:list": "浏览论坛",
+    "forum:boards": "查看论坛板块",
+    "forum:search": "搜索帖子",
+    "forum:threads": "查看帖子列表",
+    "forum:view": "查看帖子详情",
     "forum:post": "发帖回帖",
+    "forum:update": "编辑帖子",
     "forum:delete": "删帖",
     "forum:manage": "管理论坛",
     "comment:delete": "删除评论",
+    "admin:tasks": "管理任务(查看/删除)",
+    "admin:routes": "管理路由",
+    "admin:versions": "管理版本",
+    "admin:blobs:check": "管理文件(检查)",
+    "admin:blobs:upload": "管理文件(上传)",
+    "role:update": "编辑角色",
+    "role:permissions": "角色权限分配",
     "version:list": "查看版本列表",
     "version:download": "下载版本文件",
+    "version:diff": "版本差异查询",
+    "version:blob": "Blob 下载",
     "version:create": "创建版本",
     "version:delete": "删除版本",
     "route:list": "查看路由列表",
@@ -59,11 +82,20 @@ PERMISSION_CODES = {
     "route:update": "编辑路由",
     "route:delete": "删除路由",
     "route:toggle": "启停路由",
-    "notification:list": "查看通知",
+    "notification:list": "查看通知列表",
+    "notification:count": "查看未读数",
     "notification:read": "标记已读",
+    "notification:read-all": "全部已读",
     "user:list": "查看用户列表",
     "user:assign": "分配角色",
-    "user:profile": "个人中心",
+    "user:disable": "禁用用户",
+    "user:delete": "删除用户",
+    "user:view": "查看个人信息",
+    "user:update": "更新个人资料",
+    "user:email": "更换邮箱",
+    "user:downloads": "查看下载记录",
+    "user:likes": "查看点赞记录",
+    "user:avatar": "上传头像",
     "role:list": "查看角色列表",
     "role:create": "创建角色",
     "role:update": "编辑角色权限",
@@ -138,7 +170,13 @@ async def seed():
         anon_role = (await db.execute(
             select(Role).where(Role.name == "anonymous")
         )).scalar_one()
-        anon_perms = ["page:home", "page:download", "page:market", "page:forum", "page:login"]
+        anon_perms = ["page:home", "page:download", "page:market", "page:forum", "page:login",
+                     "auth:login", "auth:register", "auth:refresh", "auth:verify", "auth:send-verify",
+                     "forum:boards", "forum:search", "forum:threads", "forum:view",
+                     "task:list", "task:rankings", "task:user", "task:view", "task:comments", "task:download",
+                     "route:list",
+                     "version:list", "version:download", "version:diff", "version:blob",
+                     "public:ping", "client:stream"]
         for code in anon_perms:
             p = (await db.execute(select(Permission).where(Permission.code == code))).scalar_one()
             existing = (await db.execute(
@@ -156,7 +194,13 @@ async def seed():
         user_role = (await db.execute(
             select(Role).where(Role.name == "user")
         )).scalar_one()
-        for code in ["page:profile"]:
+        for code in ["page:profile", "auth:resend-verify",
+                     "forum:post", "forum:update", "forum:delete",
+                     "task:create", "task:like", "task:comment", "task:delete",
+                     "comment:delete",
+                     "file:check", "file:upload:init", "file:upload:chunk", "file:upload:complete",
+                     "notification:list", "notification:count", "notification:read", "notification:read-all",
+                     "user:view", "user:update", "user:email", "user:downloads", "user:likes", "user:avatar"]:
             p = (await db.execute(select(Permission).where(Permission.code == code))).scalar_one()
             existing = (await db.execute(
                 select(RolePermission).where(
@@ -255,6 +299,15 @@ async def seed():
             print("基础路由已创建")
         else:
             print("路由已存在，跳过")
+
+    # 兼容迁移：detected_type 列
+    try:
+        from sqlalchemy import text
+        await db.execute(text("ALTER TABLE fingerprints ADD COLUMN detected_type VARCHAR(16) NULL"))
+        await db.commit()
+        print("迁移: detected_type 列已添加")
+    except Exception:
+        await db.rollback()
 
 
 if __name__ == "__main__":

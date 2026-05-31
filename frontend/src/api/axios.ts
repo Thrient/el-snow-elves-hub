@@ -1,47 +1,38 @@
 import axios from "axios";
-import { tryRefreshToken } from "@/store/auth";
 import { bus } from "@/event/bus";
 
 const instance = axios.create();
 
-instance.interceptors.request.use((config) => {
-  const token = localStorage.getItem("token");
-  if (token) config.headers.Authorization = `Bearer ${token}`;
-  return config;
-});
-
-let refreshPromise: Promise<string | null> | null = null;
+let refreshPromise: Promise<boolean> | null = null;
 
 instance.interceptors.response.use(
   (res) => res,
   async (err) => {
     if (!axios.isAxiosError(err) || !err.response) {
-      // 网络错误 / 超时 —— 调用方自行处理
       return Promise.reject(err);
     }
 
     const { status } = err.response;
 
-    switch (status) {
-      case 401: {
-        if (!refreshPromise) {
-          refreshPromise = tryRefreshToken().finally(() => { refreshPromise = null; });
-        }
-        const newToken = await refreshPromise;
-        if (newToken) {
-          err.config!.headers.Authorization = `Bearer ${newToken}`;
-          return instance(err.config!);
-        }
+    if (status === 401) {
+      // 不重试 refresh 端点本身 — 避免 await refreshPromise 循环依赖
+      if (err.config?.url === "/api/v1/auth/refresh") {
         bus.emit("auth:expired");
-        break;
+        return Promise.reject(err);
       }
-      // case 403: ...  待扩展
-      // case 429: ...  待扩展
-      default:
-        break;
+      if (!refreshPromise) {
+        refreshPromise = instance.post("/api/v1/auth/refresh").then(
+          () => true,
+          () => false,
+        ).finally(() => { refreshPromise = null; });
+      }
+      const ok = await refreshPromise;
+      if (ok && err.config) {
+        return instance(err.config);
+      }
+      bus.emit("auth:expired");
     }
 
-    // 已拦截但未重试成功（如 401 刷新失败），或未拦截的状态码，原样抛出
     return Promise.reject(err);
   },
 );

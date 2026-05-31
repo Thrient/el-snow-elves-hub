@@ -1,18 +1,18 @@
 import { useEffect, useState, type FC } from "react";
 import { useNavigate } from "react-router-dom";
-import { Card, Typography, Tabs, Input, Button, List, message, Upload, Row, Col, Tag } from "antd";
-import { UserOutlined, DownloadOutlined, LikeOutlined, FileOutlined, CameraOutlined, CommentOutlined, AppstoreOutlined } from "@ant-design/icons";
+import { Card, Typography, Tabs, Input, Button, List, message, Upload, Row, Col } from "antd";
+import { UserOutlined, DownloadOutlined, LikeOutlined, FileOutlined, CameraOutlined, AppstoreOutlined } from "@ant-design/icons";
 import { useAuthStore } from "@/store/auth";
 import { taskApi } from "@/api/task";
 import type { TaskItem, UserDownload, UserLike } from "@/types";
 import { authApi, usersApi } from "@/api/identity";
+import MarketCard from "@/pages/task/components/MarketCard";
 
 const { Title } = Typography;
 
 const UserTasks: FC<{ userId: number }> = ({ userId }) => {
-  const navigate = useNavigate();
   const [tasks, setTasks] = useState<TaskItem[]>([]);
-  useEffect(() => { taskApi.userTasks(userId).then((arr) => setTasks(arr as any)); }, [userId]);
+  useEffect(() => { taskApi.userTasks(userId).then(setTasks); }, [userId]);
 
   if (tasks.length === 0) {
     return (
@@ -25,34 +25,9 @@ const UserTasks: FC<{ userId: number }> = ({ userId }) => {
 
   return (
     <Row gutter={[16, 16]}>
-      {tasks.map((task) => (
+      {tasks.map((task, idx) => (
         <Col key={task.id} xs={24} sm={12} lg={6}>
-          <Card hoverable onClick={() => navigate(`/market/${task.id}`)}
-            className="rounded-3.5 overflow-hidden border border-solid border-[#e8e3dc] transition-all duration-250 hover:-translate-y-1 hover:shadow-lg hover:border-[#d4513b]"
-            styles={{ body: { padding: "12px 14px" } }}
-            cover={
-              task.cover_url ? (
-                <div className="h-[9.4rem] relative overflow-hidden bg-[#f3f0ec]">
-                  <img src={task.cover_url} alt={task.title} loading="lazy" className="w-full h-full object-cover" />
-                </div>
-              ) : (
-                <div className="h-[9.4rem] flex items-center justify-center bg-[linear-gradient(145deg,#f5f0e8,#ebe4d8)]">
-                  <AppstoreOutlined className="text-9 text-[#d4c8b8]" />
-                </div>
-              )
-            }
-          >
-            <div className="flex items-center gap-1.5 mb-1">
-              <Tag className="text-[0.625rem] leading-4.5 rounded-1 m-0! px-1.5 border-none text-[#d4513b] bg-[#fef3ef]">{task.category}</Tag>
-              <span className="text-[0.625rem] text-[#c4bbb2]">v{task.version}</span>
-            </div>
-            <div className="text-[0.8125rem] font-600 text-[#3d3630] mb-1 truncate">{task.title}</div>
-            <div className="flex gap-3.5 text-[0.6875rem] text-[#b8afa6] pt-1.5">
-              <span><DownloadOutlined /> {task.download_count.toLocaleString()}</span>
-              <span><LikeOutlined /> {task.like_count.toLocaleString()}</span>
-              <span><CommentOutlined /> {task.comment_count.toLocaleString()}</span>
-            </div>
-          </Card>
+          <MarketCard task={task} index={idx} />
         </Col>
       ))}
     </Row>
@@ -67,6 +42,8 @@ const ProfilePage: FC = () => {
   const [avatarUrl, setAvatarUrl] = useState<string | null>(null);
   const [downloads, setDownloads] = useState<UserDownload[]>([]);
   const [likes, setLikes] = useState<UserLike[]>([]);
+  const [newEmail, setNewEmail] = useState("");
+  const [changingEmail, setChangingEmail] = useState(false);
 
   useEffect(() => {
     usersApi.getDownloads().then(setDownloads);
@@ -74,9 +51,14 @@ const ProfilePage: FC = () => {
   }, []);
 
   const save = async () => {
+    const v = username.trim();
+    if (!v) return message.warning("用户名不能为空");
+    if (v.length < 5 || v.length > 12) return message.warning("用户名 5-12 个字符");
+    if (/[<>"'&/]/.test(v)) return message.warning("用户名不能包含特殊字符");
     try {
-      await authApi.updateProfile(username);
-      useAuthStore.getState().loadFromStorage();
+      await authApi.updateProfile(v);
+      useAuthStore.getState().validateSession();
+      setUsername(v);
       setEditing(false);
       message.success("已保存");
     } catch { message.error("保存失败"); }
@@ -115,7 +97,30 @@ const ProfilePage: FC = () => {
             ) : (
               <>
                 <Title level={4} className="m-0! text-[#3d3630]">{user.username}</Title>
-                <div className="text-[0.8125rem] text-[#b8afa6] mt-1">{user.email} · {user.role_names?.includes("admin") ? "管理员" : "用户"}</div>
+                <div className="text-[0.8125rem] text-[#b8afa6] mt-1">
+                  {user.email}
+                  {user.email_verified ? (
+                    <span className="text-[#52c41a] ml-1">已验证</span>
+                  ) : (
+                    <span className="text-[#faad14] ml-1">未验证</span>
+                  )}
+                  <span onClick={() => setChangingEmail(!changingEmail)} className="text-[#d4513b] cursor-pointer ml-2">更换</span>
+                </div>
+                {changingEmail && (
+                  <div className="flex gap-2 mt-2">
+                    <Input value={newEmail} onChange={(e) => setNewEmail(e.target.value)} placeholder="新邮箱" className="w-50" size="small" />
+                    <Button size="small" type="primary" onClick={async () => {
+                      if (!newEmail) return message.warning("请输入新邮箱");
+                      try {
+                        await authApi.changeEmail(newEmail);
+                        message.success("验证邮件已发送到新邮箱");
+                        setChangingEmail(false);
+                      } catch { message.error("更换失败"); }
+                    }}>保存</Button>
+                    <Button size="small" onClick={() => setChangingEmail(false)}>取消</Button>
+                  </div>
+                )}
+                <div className="text-[0.75rem] text-[#b8afa6]">{user.role_names?.includes("admin") ? "管理员" : "用户"}</div>
               </>
             )}
           </div>

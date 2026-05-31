@@ -1,46 +1,66 @@
 import { useEffect, useState, type FC } from "react";
 import { useNavigate } from "react-router-dom";
-import { Button, Input, message } from "antd";
+import { Button, Form, Input, message } from "antd";
 import { UserOutlined, MailOutlined, LockOutlined } from "@ant-design/icons";
 import { useAuthStore } from "@/store/auth";
+import { api } from "@/api/axios";
 import axios from "axios";
 
 type Mode = "login" | "register";
 
+const PWD_MIN = 8;
+const NAME_MIN = 5;
+const NAME_MAX = 12;
+
 const LoginPage: FC = () => {
   const navigate = useNavigate();
-  const token = useAuthStore((s) => s.token);
+  const user = useAuthStore((s) => s.user);
   const login = useAuthStore((s) => s.login);
   const register = useAuthStore((s) => s.register);
   const loading = useAuthStore((s) => s.loading);
+  const [form] = Form.useForm();
 
   useEffect(() => {
-    if (token) navigate("/", { replace: true });
-  }, [token, navigate]);
+    if (user) navigate("/", { replace: true });
+  }, [user, navigate]);
 
   const [mode, setMode] = useState<Mode>("login");
-  const [form, setForm] = useState({ username: "", email: "", password: "" });
 
   const toggle = () => {
     setMode((m) => (m === "login" ? "register" : "login"));
-    setForm({ username: "", email: "", password: "" });
+    form.resetFields();
   };
 
-  const submit = async () => {
-    if (!form.email || !form.password) return message.warning("请填写完整信息");
-    if (mode === "register" && !form.username) return message.warning("请输入用户名");
+  const [verifyMsg, setVerifyMsg] = useState("");
+
+  const submit = async (values: { email: string; password: string; username?: string }) => {
     try {
       if (mode === "login") {
-        await login(form.email, form.password);
+        await login(values.email, values.password);
+        message.success("登录成功");
+        navigate("/");
       } else {
-        await register(form.username, form.email, form.password);
+        await register(values.username!, values.email, values.password);
+        message.info("注册成功，请查收验证邮件");
+        setMode("login");
       }
-      message.success(mode === "login" ? "登录成功" : "注册成功");
-      navigate("/");
     } catch (err: unknown) {
-      const msg = axios.isAxiosError(err) ? err.response?.data?.detail : "请求失败";
+      if (!axios.isAxiosError(err)) return;
+      const msg = err.response?.data?.detail;
+      if (msg === "请先验证邮箱后再登录") {
+        setVerifyMsg(form.getFieldValue("email"));
+      }
       message.error(msg || "请求失败");
     }
+  };
+
+  const resendVerify = async () => {
+    if (!verifyMsg) return;
+    try {
+      await api.post("/api/v1/auth/send-verification", { email: verifyMsg });
+      message.success("验证邮件已重新发送，请查收");
+      setVerifyMsg("");
+    } catch { message.error("发送失败"); }
   };
 
   const delay = (base: number) => ({ animation: `fadeUp .5s ${(base + (mode === "register" ? 0.05 : 0))}s both` });
@@ -57,6 +77,7 @@ const LoginPage: FC = () => {
         }
         .login-input .ant-input:focus { border-bottom-color: #d4513b; box-shadow: none; }
         .login-input .ant-input-prefix { margin-right: 10px; color: #b8afa6; }
+        .login-input .ant-form-item-explain-error { font-size: 0.6875rem; padding-left: 4px; }
       `}</style>
 
       <div className="flex w-[56.25rem] min-h-[35rem] rounded-4 overflow-hidden bg-white" style={{ boxShadow: "0 8px 40px rgba(0,0,0,.06), 0 1px 3px rgba(0,0,0,.04)" }}>
@@ -103,36 +124,70 @@ const LoginPage: FC = () => {
               <span onClick={toggle} className={`text-xl font-600 cursor-pointer transition-colors duration-200 ${mode === "register" ? "text-[#3d3630]" : "text-[#b8afa6]"}`}>注册</span>
             </div>
 
-            <div className="flex flex-col gap-2">
+            <Form form={form} onFinish={submit} validateTrigger="onBlur">
               {mode === "register" && (
-                <div className="login-input mb-1" style={delay(0.1)}>
-                  <Input prefix={<UserOutlined />} placeholder="用户名"
-                    value={form.username} onChange={(e) => setForm({ ...form, username: e.target.value })}
-                    onPressEnter={submit} />
-                </div>
+                <Form.Item
+                  name="username"
+                  className="login-input mb-1"
+                  style={delay(0.1)}
+                  rules={[
+                    { required: true, message: "请输入用户名" },
+                    { min: NAME_MIN, max: NAME_MAX, message: `用户名 ${NAME_MIN}-${NAME_MAX} 个字符` },
+                    { pattern: /^[^<>"'&/]*$/, message: "用户名包含非法字符" },
+                  ]}
+                >
+                  <Input prefix={<UserOutlined />} placeholder="用户名" />
+                </Form.Item>
               )}
-              <div className="login-input mb-1" style={delay(mode === "register" ? 0.15 : 0.1)}>
-                <Input prefix={<MailOutlined />} placeholder="邮箱"
-                  value={form.email} onChange={(e) => setForm({ ...form, email: e.target.value })}
-                  onPressEnter={submit} />
-              </div>
-              <div className="login-input mb-1" style={delay(mode === "register" ? 0.2 : 0.15)}>
-                <Input.Password prefix={<LockOutlined />} placeholder="密码"
-                  value={form.password} onChange={(e) => setForm({ ...form, password: e.target.value })}
-                  onPressEnter={submit} />
-              </div>
+              <Form.Item
+                name="email"
+                className="login-input mb-1"
+                style={delay(mode === "register" ? 0.15 : 0.1)}
+                rules={[
+                  { required: true, message: "请输入邮箱" },
+                  { type: "email", message: "邮箱格式不正确" },
+                ]}
+              >
+                <Input prefix={<MailOutlined />} placeholder="邮箱"/>
+              </Form.Item>
+              <Form.Item
+                name="password"
+                className="login-input mb-1"
+                style={delay(mode === "register" ? 0.2 : 0.15)}
+                rules={[
+                  { required: true, message: "请输入密码" },
+                  { min: PWD_MIN, message: `密码至少 ${PWD_MIN} 位` },
+                  () => ({
+                    validator(_, v: string) {
+                      if (!v) return Promise.resolve();
+                      const kinds = (/[a-z]/.test(v) ? 1 : 0) + (/[A-Z]/.test(v) ? 1 : 0) + (/\d/.test(v) ? 1 : 0);
+                      return kinds >= 2 ? Promise.resolve() : Promise.reject("需包含大小写字母、数字中至少两种");
+                    },
+                  }),
+                ]}
+              >
+                <Input.Password prefix={<LockOutlined />} placeholder="密码"/>
+              </Form.Item>
 
-              <Button type="primary" block loading={loading} onClick={submit}
-                className="mt-5 h-11 rounded-2 text-[0.875rem] font-600 tracking-[0.04em] border-none"
-                style={{ background: "#d4513b", boxShadow: "0 4px 16px rgba(212,81,59,.25)", ...delay(mode === "register" ? 0.25 : 0.2) }}>
-                {mode === "login" ? "登录" : "创建账号"}
-              </Button>
+              <Form.Item style={delay(mode === "register" ? 0.25 : 0.2)}>
+                <Button type="primary" htmlType="submit" block loading={loading}
+                  className="mt-5 h-11 rounded-2 text-[0.875rem] font-600 tracking-[0.04em] border-none"
+                  style={{ background: "#d4513b", boxShadow: "0 4px 16px rgba(212,81,59,.25)" }}>
+                  {mode === "login" ? "登录" : "创建账号"}
+                </Button>
+              </Form.Item>
+            </Form>
 
-              <p className="text-center mt-4 text-[0.75rem] text-[#b8afa6]" style={{ animation: "fadeIn .6s .3s both" }}>
-                {mode === "login" ? "还没有账号？" : "已有账号？"}
-                <span onClick={toggle} className="text-[#d4513b] cursor-pointer ml-1 font-500">{mode === "login" ? "立即注册" : "去登录"}</span>
+            {verifyMsg && (
+              <p className="text-center mt-3 text-[0.75rem] text-[#b8afa6]">
+                没收到验证邮件？
+                <span onClick={resendVerify} className="text-[#d4513b] cursor-pointer ml-1 font-500">重新发送</span>
               </p>
-            </div>
+            )}
+            <p className="text-center mt-4 text-[0.75rem] text-[#b8afa6]" style={{ animation: "fadeIn .6s .3s both" }}>
+              {mode === "login" ? "还没有账号？" : "已有账号？"}
+              <span onClick={toggle} className="text-[#d4513b] cursor-pointer ml-1 font-500">{mode === "login" ? "立即注册" : "去登录"}</span>
+            </p>
           </div>
 
           <p className="mt-8 text-[0.6875rem] text-[#c4bbb2] flex items-center gap-1.5" style={{ animation: "fadeIn .8s .5s both" }}>

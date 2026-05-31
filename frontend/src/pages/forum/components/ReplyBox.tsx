@@ -1,4 +1,4 @@
-import { useState, type FC } from "react";
+import { type FC } from "react";
 import { useNavigate } from "react-router-dom";
 import { Button, Input } from "antd";
 import { UserOutlined, SendOutlined, PictureOutlined, LockOutlined } from "@ant-design/icons";
@@ -12,12 +12,13 @@ interface Props {
   onReplyTextChange: (v: string) => void;
   onCancelReply: () => void;
   onSubmit: () => void;
+  images: File[];
+  onImagesChange: React.Dispatch<React.SetStateAction<File[]>>;
 }
 
-const ReplyBox: FC<Props> = ({ locked, replyingTo, submitting, replyText, onReplyTextChange, onCancelReply, onSubmit }) => {
+const ReplyBox: FC<Props> = ({ locked, replyingTo, submitting, replyText, onReplyTextChange, onCancelReply, onSubmit, images, onImagesChange }) => {
   const navigate = useNavigate();
   const user = useAuthStore((s) => s.user);
-  const [images, setImages] = useState<File[]>([]);
 
   if (locked) {
     return (
@@ -55,14 +56,14 @@ const ReplyBox: FC<Props> = ({ locked, replyingTo, submitting, replyText, onRepl
             <label className="cursor-pointer text-[0.75rem] text-[#6b5e55] flex items-center gap-1">
               <PictureOutlined /> 添加图片
               <input type="file" multiple accept="image/*" className="hidden"
-                onChange={(e) => setImages((prev) => [...prev, ...Array.from(e.target.files || [])])} />
+                onChange={(e) => onImagesChange((prev) => [...prev, ...Array.from(e.target.files || [])])} />
             </label>
             {images.length > 0 && (
               <div className="flex gap-1 flex-wrap flex-1 ml-3">
                 {images.map((f, i) => (
                   <div key={i} className="relative w-8 h-8 rounded-1.5 overflow-hidden border border-solid border-[#e8e3dc]">
                     <img src={URL.createObjectURL(f)} alt="" className="w-full h-full object-cover" />
-                    <div onClick={() => setImages((prev) => prev.filter((_, j) => j !== i))}
+                    <div onClick={() => onImagesChange((prev) => prev.filter((_, j) => j !== i))}
                       className="absolute inset-0 bg-[rgba(0,0,0,.4)] flex items-center justify-center cursor-pointer text-white text-[0.625rem] opacity-0 hover:opacity-100 transition-opacity duration-200">×</div>
                   </div>
                 ))}

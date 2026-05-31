@@ -1,4 +1,5 @@
 import { api } from "@/api/axios";
+import { uploadFile } from "@/api/storage";
 import type { TaskItem, CommentItem, PageResult } from "@/types";
 
 export const taskApi = {
@@ -20,14 +21,19 @@ export const taskApi = {
     api.post(`/api/v1/tasks/${id}/comments`, { content, parent_id }),
 
   upload: (form: FormData) =>
-    api.post("/api/v1/tasks", form, { headers: { "Content-Type": "multipart/form-data" } }),
+    api.post("/api/v1/tasks", form),
 
-  createWithFileId: (params: {
+  createWithFileId: async (params: {
     title: string; description: string; category: string;
     tags: string; version: string; zip_file_id: number;
     filename?: string;
     cover?: File;
   }) => {
+    let coverFingerprintId: number | undefined;
+    if (params.cover) {
+      const up = await uploadFile(params.cover);
+      coverFingerprintId = up.fingerprint_id;
+    }
     const fd = new FormData();
     fd.append("title", params.title);
     fd.append("description", params.description);
@@ -36,8 +42,8 @@ export const taskApi = {
     fd.append("version", params.version);
     fd.append("zip_file_id", String(params.zip_file_id));
     if (params.filename) fd.append("filename", params.filename);
-    if (params.cover) fd.append("cover", params.cover);
-    return api.post("/api/v1/tasks", fd, { headers: { "Content-Type": "multipart/form-data" } });
+    if (coverFingerprintId) fd.append("cover_fingerprint_id", String(coverFingerprintId));
+    return api.post("/api/v1/tasks", fd);
   },
 
   ranking: (period: string = "all") =>

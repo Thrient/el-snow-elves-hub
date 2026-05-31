@@ -1,4 +1,5 @@
 import { api } from "@/api/axios";
+import { uploadFile } from "@/api/storage";
 import type { AdminStats, AdminUser, RoleItem, PermItem, AdminVersion, AdminTask, RouteAdmin } from "@/types";
 
 export const adminApi = {
@@ -31,7 +32,7 @@ export const adminApi = {
   deletePermission: (id: number) => api.delete(`/api/v1/admin/permissions/${id}`),
 
   // Versions
-  listVersions: () => api.get<AdminVersion[]>("/api/v1/admin/versions"),
+  listVersions: () => api.get<{ code: number; data: AdminVersion[] }>("/api/v1/versions").then((r) => r.data),
   createVersion: (data: {
     version: string;
     platform?: string;
@@ -43,24 +44,17 @@ export const adminApi = {
   deleteVersion: (id: number) => api.delete(`/api/v1/admin/versions/${id}`),
 
   // Blob
-  checkBlobs: (sha256_list: string[]): Promise<{ existing: string[]; missing: string[] }> =>
-    api.post("/api/v1/admin/blobs/check", { sha256_list }),
+  checkBlobs: (sha256_list: string[]) =>
+    api.post<{ code: number; data: { existing: string[]; missing: string[] } }>("/api/v1/files/check", { sha256: sha256_list }).then((r) => r.data),
 
-  uploadBlob: (file: File, onProgress?: (pct: number) => void): Promise<{ fingerprint_id: number; sha256: string; size: number }> => {
-    const form = new FormData();
-    form.append("file", file);
-    return api.post("/api/v1/admin/blobs/upload", form, onProgress ? {
-      onUploadProgress: (e: { loaded?: number; total?: number }) => {
-        if (e.total) onProgress(Math.round((e.loaded || 0) / e.total * 100));
-      },
-    } : undefined);
-  },
+  uploadBlob: (file: File, onProgress?: (pct: number) => void) => uploadFile(file, onProgress),
 
   // Tasks
-  listTasks: () => api.get<AdminTask[]>("/api/v1/admin/tasks"),
+  listTasks: () =>
+    api.get<{ code: number; data: { items: AdminTask[] } }>("/api/v1/tasks", { params: { size: 50 } }).then((r) => r.data.items),
   updateTaskStatus: (id: number, status: string) =>
     api.put(`/api/v1/admin/tasks/${id}/status`, { status }),
-  deleteTask: (id: number) => api.delete(`/api/v1/admin/tasks/${id}`),
+  deleteTask: (id: number) => api.delete(`/api/v1/tasks/${id}`),
 
   // Routes
   listRoutes: () => api.get<RouteAdmin[]>("/api/v1/admin/routes"),

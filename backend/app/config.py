@@ -12,7 +12,7 @@ class Settings(BaseSettings):
 
     # App
     app_name: str = "时雪-创意工坊"
-    debug: bool = True
+    debug: bool = False
     secret_key: str
 
     # MySQL
@@ -27,12 +27,21 @@ class Settings(BaseSettings):
     jwt_expire_minutes: int = 60 * 24 * 7
     jwt_refresh_expire_days: int = 30
 
+    # Cookie
+    cookie_secure: bool = True
+    cookie_domain: str = ""
+
     # MinIO
     minio_endpoint: str = "localhost:9000"
+    minio_public_endpoint: str = ""
     minio_access_key: str = "minioadmin"
     minio_secret_key: str = "minioadmin"
     minio_bucket: str = "el-snow-hub"
     minio_secure: bool = False
+
+    # Email (Resend)
+    resend_api_key: str = ""
+    mail_from: str = "noreply@elarion.cn"
 
     # Upload
     max_upload_size: int = 100 * 1024 * 1024

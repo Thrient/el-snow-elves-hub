@@ -12,9 +12,7 @@ const DashboardPage: FC = () => {
   }, []);
 
   useEffect(() => {
-    const token = localStorage.getItem("token");
-    if (!token) return;
-    const es = new EventSource(`/api/v1/admin/stream?token=${encodeURIComponent(token)}`);
+    const es = new EventSource("/api/v1/admin/stream");
     es.onmessage = (e) => {
       try {
         const d = JSON.parse(e.data);

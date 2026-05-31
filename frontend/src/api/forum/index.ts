@@ -1,5 +1,6 @@
 import { api } from "@/api/axios";
-import type { ForumBoard, ThreadItem, ThreadDetail, PageResult } from "@/types";
+import { uploadFile } from "@/api/storage";
+import type { ForumBoard, ThreadItem, ThreadDetail, ReplyItem, PageResult } from "@/types";
 
 export const forumApi = {
   listBoards: () =>
@@ -16,7 +17,7 @@ export const forumApi = {
     api.post("/api/v1/forum/threads", data),
 
   createReply: (threadId: number, content: string, parent_id?: number, image_ids?: number[]) =>
-    api.post(`/api/v1/forum/threads/${threadId}/replies`, { content, parent_id, image_ids }),
+    api.post<{ code: number; data: ReplyItem }>(`/api/v1/forum/threads/${threadId}/replies`, { content, parent_id, image_ids }),
 
   likePost: (postId: number) =>
     api.post<{ code: number; data: { liked: boolean; like_count: number } }>(`/api/v1/forum/posts/${postId}/like`),
@@ -34,11 +35,5 @@ export const forumApi = {
     api.get<{ code: number; data: PageResult<ThreadItem> & { query: string } }>("/api/v1/forum/search", { params: { q, page } })
       .then((r) => r.data),
 
-  uploadImage: (file: File): Promise<{ fingerprint_id: number; url: string }> => {
-    const fd = new FormData();
-    fd.append("file", file);
-    return api.post<{ code: number; data: { fingerprint_id: number; url: string } }>("/api/v1/files/upload", fd, {
-      headers: { "Content-Type": "multipart/form-data" },
-    }).then((r) => r.data);
-  },
+  uploadImage: (file: File) => uploadFile(file),
 };

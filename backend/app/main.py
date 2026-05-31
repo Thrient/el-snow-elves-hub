@@ -17,8 +17,8 @@ app.state.limiter = get_limiter()
 app.add_middleware(SlowAPIMiddleware)
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
-    allow_credentials=False,
+    allow_origins=["http://localhost:5173", "https://elves.elarion.cn"],
+    allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )

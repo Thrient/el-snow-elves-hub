@@ -5,7 +5,7 @@ import { adminApi } from "@/api/admin";
 import type { RouteAdmin, PermItem } from "@/types";
 import { useAuthStore } from "@/store/auth";
 import { getComponentNames } from "@/router";
-import iconMap from "@/components/IconResolver";
+import { iconMap } from "@/components/IconResolver";
 
 const iconOptions = Object.keys(iconMap).map((k) => ({ value: k, label: k }));
 

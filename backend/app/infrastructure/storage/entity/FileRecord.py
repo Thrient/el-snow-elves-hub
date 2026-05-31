@@ -16,9 +16,6 @@ class FileRecord(Base):
         ForeignKey("fingerprints.id"), nullable=False, comment="内容指纹（去重在这层）"
     )
     filename: Mapped[str] = mapped_column(String(255), nullable=False)
-    content_type: Mapped[str] = mapped_column(
-        String(128), default="application/octet-stream", nullable=False
-    )
     size: Mapped[int] = mapped_column(Integer, nullable=False)
     uploaded_by: Mapped[int | None] = mapped_column(
         ForeignKey("users.id"), nullable=True, comment="上传者，系统上传可为空"

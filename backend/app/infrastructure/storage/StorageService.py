@@ -39,14 +39,12 @@ class StorageService:
         db: AsyncSession,
         fp: Fingerprint,
         filename: str,
-        content_type: str = "application/octet-stream",
         uploaded_by: int | None = None,
     ) -> FileRecord:
         """创建文件上传记录。先调 store() 拿指纹，再调此函数记录上传行为。"""
         record = FileRecord(
             fingerprint_id=fp.id,
             filename=filename,
-            content_type=content_type,
             size=fp.size,
             uploaded_by=uploaded_by,
         )

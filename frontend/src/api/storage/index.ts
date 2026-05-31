@@ -15,14 +15,34 @@ export const uploadApi = {
   uploadChunk: (uploadId: string, chunkIndex: number, blob: Blob) => {
     const form = new FormData();
     form.append("chunk", blob);
-    return api.post(`/api/v1/uploads/${uploadId}/chunk?n=${chunkIndex}`, form, {
-      headers: { "Content-Type": "multipart/form-data" },
-    });
+    return api.post(`/api/v1/uploads/${uploadId}/chunk?n=${chunkIndex}`, form);
   },
 
   complete: (uploadId: string): Promise<{ fingerprint_id: number }> =>
     api.post<{ code: number; data: { fingerprint_id: number } }>(`/api/v1/uploads/${uploadId}/complete`).then((r) => r.data),
 };
+
+/**
+ * 统一文件上传 — 所有上传走分块流程，小文件=1个分片
+ * 返回 { fingerprint_id }，消费端用它调用业务接口
+ */
+export async function uploadFile(file: File, onProgress?: (pct: number) => void): Promise<{ fingerprint_id: number }> {
+  const sha256 = await computeSHA256(file, (p) => onProgress?.(Math.round(p * 0.1)));
+  const check = await uploadApi.check(sha256);
+  if (check.exists && check.fingerprint_id) return { fingerprint_id: check.fingerprint_id };
+
+  const totalChunks = Math.ceil(file.size / CHUNK_SIZE);
+  const session = await uploadApi.init(file.name, file.size, totalChunks);
+
+  for (let i = 0; i < totalChunks; i++) {
+    const start = i * CHUNK_SIZE;
+    const blob = file.slice(start, Math.min(start + CHUNK_SIZE, file.size));
+    await uploadApi.uploadChunk(session.upload_id, i, blob);
+    onProgress?.(10 + Math.round((i + 1) / totalChunks * 90));
+  }
+
+  return uploadApi.complete(session.upload_id);
+}
 
 export function computeSHA256(file: File, onProgress?: (pct: number) => void): Promise<string> {
   return new Promise((resolve, reject) => {

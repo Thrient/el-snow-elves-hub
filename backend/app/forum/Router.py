@@ -1,29 +1,23 @@
 """论坛 — 板块 / 帖子 / 回复 / 搜索 / 点赞"""
 from __future__ import annotations
 import math
-import time
 from datetime import datetime, timezone
 
-from fastapi import APIRouter, Depends, HTTPException, Query, Request, UploadFile, File
+from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy import select, func, desc, and_, or_, delete as sa_delete
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.infrastructure.Database import get_db
-from app.api.Deps import get_current_user, get_optional_user, require_perm_any
+from app.api.Deps import get_current_user, get_optional_user, require_owner, require_perm_any, require_verified
 from app.infrastructure.Response import ok
 from app.forum.entity.ForumBoard import ForumBoard
 from app.forum.entity.ForumPost import ForumPost
+from app.forum.entity.ForumLike import ForumLike
 from app.identity.entity.User import User
-from app.infrastructure.storage.entity.Fingerprint import Fingerprint
-from app.infrastructure.storage.entity.FileRecord import FileRecord
-from app.infrastructure.storage.StorageService import storage_service
 from app.notification.Router import create_notification
-from app.infrastructure.rbac.entity.Permission import Permission
-from app.infrastructure.storage.FileValidator import validate_file_size, validate_image
 
 router = APIRouter(prefix="/forum", tags=["论坛"])
 
-_view_dedup: dict[tuple, float] = {}
 
 
 # ── Schemas ──
@@ -60,10 +54,11 @@ def _thread_out(p: ForumPost) -> ThreadOut:
 # ── Boards ──
 
 @router.get("/boards")
-async def list_boards(db: AsyncSession = Depends(get_db)):
+async def list_boards(db: AsyncSession = Depends(get_db),
+                      _=Depends(require_perm_any("forum:boards"))):
     stmt = (
         select(ForumBoard, func.count(ForumPost.id).label("thread_count"))
-        .outerjoin(ForumPost, ForumPost.board_id == ForumBoard.id)
+        .outerjoin(ForumPost, and_(ForumPost.board_id == ForumBoard.id, ForumPost.parent_id == None))
         .group_by(ForumBoard.id)
         .order_by(ForumBoard.sort_order)
     )
@@ -81,6 +76,7 @@ async def list_boards(db: AsyncSession = Depends(get_db)):
 async def search_threads(
     q: str = Query(""), page: int = Query(1, ge=1),
     db: AsyncSession = Depends(get_db),
+    _=Depends(require_perm_any("forum:search")),
 ):
     query = select(ForumPost).where(and_(ForumPost.parent_id == None, ForumPost.title.contains(q)))
     total = (await db.execute(select(func.count()).select_from(query.subquery()))).scalar() or 0
@@ -94,6 +90,7 @@ async def search_threads(
 async def list_threads(
     board_id: int, page: int = Query(1, ge=1),
     db: AsyncSession = Depends(get_db),
+    _=Depends(require_perm_any("forum:threads")),
 ):
     query = select(ForumPost).where(and_(ForumPost.board_id == board_id, ForumPost.parent_id == None))
     total = (await db.execute(select(func.count()).select_from(query.subquery()))).scalar() or 0
@@ -107,32 +104,58 @@ async def list_threads(
 async def get_thread(
     thread_id: int, db: AsyncSession = Depends(get_db),
     user: User | None = Depends(get_optional_user),
+    _=Depends(require_perm_any("forum:view")),
 ):
     p = (await db.execute(select(ForumPost).where(ForumPost.id == thread_id))).scalar_one_or_none()
     if not p:
         raise HTTPException(404, "帖子不存在")
 
-    key = (user.id if user else 0, thread_id)
-    now = time.time()
-    if key not in _view_dedup or now - _view_dedup[key] > 3600:
+    from app.infrastructure.Redis import get_redis
+    r = get_redis()
+    vk = f"view:{user.id if user else 0}:{thread_id}"
+    if not r.exists(vk):
+        r.setex(vk, 3600, "1")
         p.view_count += 1
-        _view_dedup[key] = now
     await db.commit()
     await db.refresh(p)
 
+    # Collect all post IDs in this thread + query current user's likes
+    all = list((await db.execute(
+        select(ForumPost).where(ForumPost.thread_id == thread_id).order_by(ForumPost.created_at)
+    )).scalars().all())
+    thread_post_ids = {p.id, *(r.id for r in all)}
+    liked_ids: set[int] = set()
+    if user:
+        likes = (await db.execute(
+            select(ForumLike.post_id).where(
+                and_(ForumLike.post_id.in_(thread_post_ids), ForumLike.user_id == user.id)
+            )
+        )).scalars().all()
+        liked_ids = set(likes)
+
+    # Compute like counts from forum_likes table
+    like_counts: dict[int, int] = dict.fromkeys(thread_post_ids, 0)
+    count_rows = (await db.execute(
+        select(ForumLike.post_id, func.count(ForumLike.id))
+        .where(ForumLike.post_id.in_(thread_post_ids))
+        .group_by(ForumLike.post_id)
+    )).all()
+    for post_id, cnt in count_rows:
+        like_counts[post_id] = cnt
+
     replies = []
-    for r in (p.replies or []):
+    for r in all:
         parent_author = None
         parent_content = None
         if r.parent_id:
-            parent = next((x for x in (p.replies or []) if x.id == r.parent_id), None)
+            parent = next((x for x in all if x.id == r.parent_id), None)
             if parent:
                 parent_author = parent.author.username if parent.author else None
                 parent_content = parent.content
         replies.append(ReplyOut(
             id=r.id, content=r.content, author=_author_out(r.author),
             parent_id=r.parent_id, parent_author=parent_author, parent_content=parent_content,
-            image_urls=[], like_count=r.like_count,
+            image_urls=[], like_count=like_counts.get(r.id, 0), liked=r.id in liked_ids,
             created_at=r.created_at, updated_at=r.updated_at,
         ))
 
@@ -141,7 +164,8 @@ async def get_thread(
         id=p.id, title=p.title, content=p.content, author=_author_out(p.author),
         board_id=p.board_id, board_name=board.name if board else "",
         image_urls=[], is_pinned=p.is_pinned, is_locked=p.is_locked,
-        view_count=p.view_count, reply_count=p.reply_count, like_count=p.like_count,
+        view_count=p.view_count, reply_count=p.reply_count, like_count=like_counts.get(p.id, 0),
+        liked=p.id in liked_ids,
         last_reply_at=p.last_reply_at.isoformat() if p.last_reply_at else None,
         created_at=p.created_at, updated_at=p.updated_at,
         replies=replies,
@@ -155,6 +179,7 @@ async def create_thread(
     body: ThreadCreate, user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
     _=Depends(require_perm_any("forum:post")),
+    _v=Depends(require_verified),
 ):
     board = (await db.execute(select(ForumBoard).where(ForumBoard.id == body.board_id))).scalar_one_or_none()
     if not board:
@@ -177,6 +202,7 @@ async def create_reply(
     user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
     _=Depends(require_perm_any("forum:post")),
+    _v=Depends(require_verified),
 ):
     thread = (await db.execute(select(ForumPost).where(ForumPost.id == thread_id))).scalar_one_or_none()
     if not thread:
@@ -184,15 +210,18 @@ async def create_reply(
     if thread.is_locked:
         raise HTTPException(400, "帖子已锁定")
 
+    parent = None
     parent_auth = None
+    parent_content = None
     if body.parent_id:
         parent = (await db.execute(select(ForumPost).where(ForumPost.id == body.parent_id))).scalar_one_or_none()
         if parent:
             parent_auth = parent.author.username if parent.author else None
+            parent_content = parent.content
 
     r = ForumPost(
         content=body.content, author_id=user.id, board_id=thread.board_id,
-        parent_id=body.parent_id, thread_id=thread_id,
+        parent_id=body.parent_id or thread_id, thread_id=thread_id,
         image_ids=body.image_ids or [],
     )
     db.add(r)
@@ -206,12 +235,19 @@ async def create_reply(
             f"{user.username} 回复了你的帖子",
             f"/forum/post/{thread_id}")
 
-    if body.parent_id and parent and parent.author_id != user.id:
+    if parent and parent.author_id != user.id:
         await create_notification(db, parent.author_id, user.id, "mention",
             f"{user.username} 在评论中提到了你",
             f"/forum/post/{thread_id}")
 
-    return ok({"id": r.id})
+    return ok(ReplyOut(
+        id=r.id, content=r.content, author=_author_out(user),
+        parent_id=r.parent_id if r.parent_id != thread_id else None,
+        parent_author=parent_auth,
+        parent_content=parent_content,
+        image_urls=[], like_count=0, liked=False,
+        created_at=r.created_at, updated_at=r.updated_at,
+    ))
 
 
 # ── Update / Delete Thread ──
@@ -221,12 +257,13 @@ async def update_thread(
     thread_id: int, body: ThreadUpdate,
     user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
+    _=Depends(require_perm_any("forum:update")),
+    _v=Depends(require_verified),
 ):
     p = (await db.execute(select(ForumPost).where(ForumPost.id == thread_id))).scalar_one_or_none()
     if not p:
         raise HTTPException(404, "帖子不存在")
-    if p.author_id != user.id:
-        raise HTTPException(403, "只能编辑自己的帖子")
+    await require_owner(p, user)
     if body.title is not None:
         p.title = body.title
     if body.content is not None:
@@ -244,11 +281,11 @@ async def delete_thread(
     p = (await db.execute(select(ForumPost).where(ForumPost.id == thread_id))).scalar_one_or_none()
     if not p:
         raise HTTPException(404, "帖子不存在")
-    scope_perm = user.permissions and ("*" in user.permissions or "forum:manage" in user.permissions)
-    if p.author_id != user.id and not scope_perm:
-        raise HTTPException(403, "只能删除自己的帖子")
+    await require_owner(p, user)
 
     child_ids = (await db.execute(select(ForumPost.id).where(ForumPost.thread_id == thread_id))).scalars().all()
+    all_ids = [thread_id, *child_ids]
+    await db.execute(sa_delete(ForumLike).where(ForumLike.post_id.in_(all_ids)))
     for cid in child_ids:
         await db.execute(sa_delete(ForumPost).where(ForumPost.id == cid))
     await db.delete(p)
@@ -285,34 +322,24 @@ async def like_post(
     post_id: int, user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
     _=Depends(require_perm_any("forum:post")),
+    _v=Depends(require_verified),
 ):
     p = (await db.execute(select(ForumPost).where(ForumPost.id == post_id))).scalar_one_or_none()
     if not p:
         raise HTTPException(404, "帖子不存在")
-    p.like_count += 1
+    existing = (await db.execute(
+        select(ForumLike).where(and_(ForumLike.post_id == post_id, ForumLike.user_id == user.id))
+    )).scalar_one_or_none()
+    if existing:
+        await db.delete(existing)
+        await db.commit()
+        cnt = (await db.execute(
+            select(func.count(ForumLike.id)).where(ForumLike.post_id == post_id)
+        )).scalar() or 0
+        return ok({"liked": False, "like_count": cnt})
+    db.add(ForumLike(post_id=post_id, user_id=user.id))
     await db.commit()
-    return ok({"like_count": p.like_count})
-
-
-# ── Upload Image ──
-
-@router.post("/upload-image")
-async def upload_image(
-    file: UploadFile = File(...),
-    user: User = Depends(get_current_user),
-    db: AsyncSession = Depends(get_db),
-    _=Depends(require_perm_any("forum:post")),
-):
-    validate_file_size(file)
-    validate_image(await file.read())
-    await file.seek(0)
-    data = await file.read()
-    fp = await storage_service.store(db, data, file.content_type or "image/png")
-    await db.flush()
-    record = await storage_service.create_record(
-        db, fp, filename=file.filename or "image.png",
-        content_type=file.content_type or "image/png",
-        uploaded_by=user.id,
-    )
-    await db.commit()
-    return ok({"fingerprint_id": fp.id, "record_id": record.id, "url": storage_service.url(fp)})
+    cnt = (await db.execute(
+        select(func.count(ForumLike.id)).where(ForumLike.post_id == post_id)
+    )).scalar() or 0
+    return ok({"liked": True, "like_count": cnt})

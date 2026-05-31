@@ -17,7 +17,7 @@ class ForumPost(Base):
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     title: Mapped[str | None] = mapped_column(String(128), nullable=True)
     content: Mapped[str] = mapped_column(Text, nullable=False)
-    author_id: Mapped[int] = mapped_column(ForeignKey("users.id"), nullable=False)
+    author_id: Mapped[int | None] = mapped_column(ForeignKey("users.id"), nullable=True)
     board_id: Mapped[int] = mapped_column(ForeignKey("forum_boards.id"), nullable=False)
     parent_id: Mapped[int | None] = mapped_column(ForeignKey("forum_posts.id"), nullable=True)
     thread_id: Mapped[int | None] = mapped_column(
@@ -26,7 +26,6 @@ class ForumPost(Base):
     is_pinned: Mapped[bool] = mapped_column(Boolean, default=False)
     is_locked: Mapped[bool] = mapped_column(Boolean, default=False)
     view_count: Mapped[int] = mapped_column(Integer, default=0)
-    like_count: Mapped[int] = mapped_column(Integer, default=0)
     reply_count: Mapped[int] = mapped_column(Integer, default=0)
     image_ids: Mapped[list | None] = mapped_column(JSON, default=list)
     last_reply_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)

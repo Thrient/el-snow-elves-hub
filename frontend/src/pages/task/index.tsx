@@ -1,4 +1,4 @@
-import { useEffect, useState, useCallback, type FC } from "react";
+import { useEffect, useState, useCallback, useRef, type FC } from "react";
 import { useNavigate } from "react-router-dom";
 import { Input, Select, Row, Col, Typography, Button, Skeleton } from "antd";
 import { SearchOutlined, PlusOutlined, FireOutlined, AppstoreOutlined } from "@ant-design/icons";
@@ -19,10 +19,14 @@ const MarketPage: FC = () => {
   const [category, setCategory] = useState("");
   const [sort, setSort] = useState("latest");
 
-  const load = useCallback(async () => {
+  const searchRef = useRef(search);
+  searchRef.current = search;
+
+  const load = useCallback(async (searchText?: string) => {
     setLoading(true);
     try {
-      const r = await taskApi.list({ search, category: category === "全部" ? "" : category, sort });
+      const q = searchText ?? searchRef.current;
+      const r = await taskApi.list({ search: q, category: category === "全部" ? "" : category, sort });
       setData(r);
     } catch { /* ignore */ }
     finally { setLoading(false); }
@@ -30,7 +34,7 @@ const MarketPage: FC = () => {
 
   useEffect(() => { load(); }, [load]);
 
-  const doSearch = () => load();
+  const doSearch = () => load(search);
 
   return (
     <div className="pt-8">

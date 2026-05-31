@@ -41,8 +41,8 @@ const PostDetail: FC<Props> = ({ thread, liked, canManage, isAuthor, onLike, onE
   return (
     <div id="floor-1" className="p-6 px-7 rounded-4 mb-2 bg-white border border-solid border-[#e8e3dc]">
       {/* Header */}
-      <div className="flex items-center gap-3 pb-4 mb-4 border-b border-solid border-[#f0ede8]">
-        <div className="w-12 h-12 rounded-full flex-shrink-0 flex items-center justify-center bg-[linear-gradient(135deg,#f5f0e8,#ebe4d8)] border-2 border-solid border-[#f0ede8] overflow-hidden">
+      <div className="flex items-center gap-3 pb-4 mb-4">
+        <div className="w-12 h-12 rounded-full flex-shrink-0 flex items-center justify-center bg-[linear-gradient(135deg,#f5f0e8,#ebe4d8)] overflow-hidden">
           {thread.author?.avatar_url ? (
             <img src={thread.author.avatar_url} alt="" className="w-full h-full rounded-full object-cover" />
           ) : (

@@ -11,14 +11,18 @@ import { timeAgo } from "@/util/time";
 
 const { Title } = Typography;
 
+const escapeHtml = (s: string) =>
+  s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;").replace(/'/g, "&#039;");
+
 const highlight = (text: string, query: string) => {
-  if (!query) return text;
-  const regex = new RegExp(`(${query.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")})`, "gi");
+  if (!query) return escapeHtml(text);
+  const escapedQuery = query.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const regex = new RegExp(`(${escapedQuery})`, "gi");
   const parts = text.split(regex);
   return parts.map((p) =>
     regex.test(p)
-      ? `<mark style="background:#fef08a;color:#854d0e;border-radius:2px;padding:0 2px">${p}</mark>`
-      : p
+      ? `<mark style="background:#fef08a;color:#854d0e;border-radius:2px;padding:0 2px">${escapeHtml(p)}</mark>`
+      : escapeHtml(p)
   ).join("");
 };
 
@@ -31,6 +35,7 @@ const ForumSearchPage: FC = () => {
   const [page, setPage] = useState(1);
   const [loading, setLoading] = useState(false);
   const [searchInput, setSearchInput] = useState(query);
+  useEffect(() => { setSearchInput(query); }, [query]);
 
   const load = () => {
     if (!query) return;

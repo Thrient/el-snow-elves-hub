@@ -9,7 +9,7 @@ import { useAuthStore } from "@/store/auth";
 const { Title, Paragraph } = Typography;
 
 const TaskDetailPage: FC = () => {
-  const { id } = useParams<{ id: string }>();
+  const { taskId } = useParams<{ taskId: string }>();
   const navigate = useNavigate();
   const user = useAuthStore((s) => s.user);
   const [task, setTask] = useState<TaskItem | null>(null);
@@ -18,20 +18,22 @@ const TaskDetailPage: FC = () => {
   const [loading, setLoading] = useState(true);
 
   const load = async () => {
-    if (!id) return;
+    if (!taskId) return;
     setLoading(true);
-    try { const t = await taskApi.get(Number(id)); setTask(t); setComments(await taskApi.comments(Number(id))); }
+    try { const t = await taskApi.get(Number(taskId)); setTask(t); setComments(await taskApi.comments(Number(taskId))); }
     catch { message.error("加载失败"); }
     finally { setLoading(false); }
   };
 
-  useEffect(() => { load(); }, [id]);
+  useEffect(() => { load(); }, [taskId]);
 
   const handleLike = async () => {
     if (!user) return message.warning("请先登录");
     if (!task) return;
-    const result = await taskApi.like(task.id);
-    setTask({ ...task, liked: result.liked, like_count: result.like_count });
+    try {
+      const result = await taskApi.like(task.id);
+      setTask({ ...task, liked: result.liked, like_count: result.like_count });
+    } catch { message.error("点赞失败"); }
   };
 
   const handleComment = async () => {
@@ -114,7 +116,7 @@ const TaskDetailPage: FC = () => {
           </div>
 
           {/* Comments */}
-          <div className="border-t border-solid border-[#e8e3dc] pt-7">
+          <div>
             <Title level={4} className="text-[#3d3630]! mb-5 font-600"><CommentOutlined /> 评论 ({comments.length})</Title>
 
             {comments.length === 0 ? (
@@ -162,7 +164,7 @@ const TaskDetailPage: FC = () => {
               <div className="text-[0.75rem] text-[#b8afa6] mt-0.5">任务作者</div>
             </div>
 
-            <div className="flex justify-center gap-6 py-3 border-t border-b border-solid border-[#f0ede8] mb-3.5">
+            <div className="flex justify-center gap-6 py-3 mb-3.5">
               <div className="text-center">
                 <div className="font-700 text-[#3d3630] text-base">{task.download_count.toLocaleString()}</div>
                 <div className="text-[0.625rem] text-[#b8afa6]">下载</div>

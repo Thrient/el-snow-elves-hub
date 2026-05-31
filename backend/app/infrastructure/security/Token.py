@@ -48,3 +48,21 @@ def decode_refresh_token(token: str) -> dict | None:
         return payload
     except JWTError:
         return None
+
+
+def create_verify_token(user_id: int) -> str:
+    expire = datetime.now(timezone.utc) + timedelta(hours=1)
+    return jwt.encode(
+        {"sub": str(user_id), "exp": expire, "type": "verify"},
+        settings.jwt_secret, algorithm=settings.jwt_algorithm,
+    )
+
+
+def decode_verify_token(token: str) -> dict | None:
+    try:
+        payload = jwt.decode(token, settings.jwt_secret, algorithms=[settings.jwt_algorithm])
+        if payload.get("type") != "verify":
+            return None
+        return payload
+    except JWTError:
+        return None

@@ -4,12 +4,13 @@ import json
 import math
 from datetime import datetime, timezone
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from fastapi.responses import StreamingResponse
 from sqlalchemy import select, func, desc, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.infrastructure.Database import get_db
+from app.infrastructure.security.Token import decode_access_token
 from app.api.Deps import get_current_user, require_perm_any
 from app.infrastructure.Response import ok
 from app.notification.entity.Notification import Notification
@@ -79,16 +80,23 @@ async def _sse_generator(user_id: int):
 
 
 @router.get("/stream")
-async def notification_stream(token: str = Query(...), db: AsyncSession = Depends(get_db)):
-    from app.infrastructure.security.Token import decode_access_token
+async def notification_stream(request: Request, db: AsyncSession = Depends(get_db)):
     from app.infrastructure.sse.OnlineTracker import connect as online_connect, disconnect as online_disconnect
 
+    token = request.cookies.get("access_token")
+    if not token:
+        raise HTTPException(401, "未提供认证令牌")
     payload = decode_access_token(token)
     if not payload:
         raise HTTPException(401, "token 无效")
-    user_id = int(payload.get("sub", 0))
-    if not user_id:
+    uid = payload.get("sub")
+    if not uid:
         raise HTTPException(401, "token 数据缺失")
+
+    user = (await db.execute(select(User).where(User.id == int(uid)))).scalar_one_or_none()
+    if not user:
+        raise HTTPException(401, "用户不存在")
+    user_id = user.id
 
     web_client_id, _ = await online_connect("web")
 
@@ -144,7 +152,7 @@ async def list_notifications(
 async def unread_count(
     user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
-    _=Depends(require_perm_any("notification:list")),
+    _=Depends(require_perm_any("notification:count")),
 ):
     count = (await db.execute(
         select(func.count(Notification.id)).where(
@@ -174,7 +182,7 @@ async def mark_read(
 async def mark_all_read(
     user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
-    _=Depends(require_perm_any("notification:read")),
+    _=Depends(require_perm_any("notification:read-all")),
 ):
     await db.execute(
         update(Notification).where(

@@ -5,11 +5,12 @@ from urllib.parse import quote
 
 from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import StreamingResponse
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.infrastructure.Database import async_session, get_db
 from app.api.Deps import require_perm_any
+from app.infrastructure.Response import ok
 from app.infrastructure.sse.OnlineTracker import connect as online_connect, disconnect as online_disconnect
 from app.infrastructure.sse.SseConnection import SseConnection
 from app.release.entity.DownloadVersion import DownloadVersion
@@ -32,25 +33,27 @@ async def list_versions(
     _=Depends(require_perm_any("version:list")),
 ):
     result = await db.execute(
-        select(DownloadVersion).order_by(DownloadVersion.created_at.desc())
+        select(DownloadVersion, func.count(VersionFile.id).label("file_count"))
+        .outerjoin(VersionFile, VersionFile.version_id == DownloadVersion.id)
+        .group_by(DownloadVersion.id)
+        .order_by(DownloadVersion.created_at.desc())
     )
-    return {
-        "code": 0,
-        "data": [
-            {
-                "id": v.id, "version": v.version, "platform": v.platform,
-                "changelog": v.changelog, "is_latest": v.is_latest,
-                "is_mandatory": v.is_mandatory, "created_at": v.created_at.isoformat(),
-            }
-            for v in result.scalars().all()
-        ],
-    }
+    items = [
+        {
+            "id": v.id, "version": v.version, "platform": v.platform,
+            "changelog": v.changelog, "is_latest": v.is_latest,
+            "is_mandatory": v.is_mandatory, "file_count": file_count,
+            "created_at": v.created_at.isoformat(),
+        }
+        for v, file_count in result.all()
+    ]
+    return ok(items)
 
 
 @router.post("/versions/diff", response_model=DiffResponse)
 async def diff_versions(
     body: DiffRequest,
-    _=Depends(require_perm_any("version:download")),
+    _=Depends(require_perm_any("version:diff")),
 ):
     """桌面端发送本地 manifest，返回差异文件列表"""
     async with async_session() as db:
@@ -98,7 +101,7 @@ async def diff_versions(
 @router.get("/versions/blobs/{fingerprint_id}")
 async def download_blob(
     fingerprint_id: int,
-    _=Depends(require_perm_any("version:download")),
+    _=Depends(require_perm_any("version:blob")),
 ):
     """通过指纹 ID 下载单个文件（桌面端更新用）"""
     async with async_session() as db:
@@ -172,7 +175,8 @@ async def download_version_zip(
 # SSE 桌面客户端长连接
 # ═══════════════════════════════════════════
 
-@router.get("/client/stream")
+@router.get("/client/stream",
+            dependencies=[Depends(require_perm_any("client:stream"))])
 async def client_stream():
     client_id, q = await online_connect("desktop")
     conn = SseConnection(q, on_disconnect=lambda: online_disconnect("desktop", client_id))
