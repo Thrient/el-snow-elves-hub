@@ -64,7 +64,9 @@ const UsersPage: FC = () => {
 
   return (
     <div className="pt-8 w-[min(94%,70rem)] mx-auto">
-      <h2 className="text-[1.125rem] font-600 text-[#3d3630] mb-6">用户管理</h2>
+      <div className="flex justify-between items-center mb-6">
+        <h2 className="text-[1.125rem] font-600 text-[#3d3630] m-0">用户管理</h2>
+      </div>
       <Table
         dataSource={users} rowKey="id" loading={loading}
         pagination={{ pageSize: 20, showTotal: (t: number) => `共 ${t} 条` }}

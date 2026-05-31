@@ -27,7 +27,9 @@ const DashboardPage: FC = () => {
 
   return (
     <div className="pt-8 w-[min(92%,60rem)] mx-auto">
-      <h2 className="text-[1.125rem] font-600 text-[#3d3630] mb-6">仪表盘</h2>
+      <div className="flex justify-between items-center mb-6">
+        <h2 className="text-[1.125rem] font-600 text-[#3d3630] m-0">仪表盘</h2>
+      </div>
       <Row gutter={[16, 16]}>
         <Col xs={24} sm={12}>
           <Card hoverable className="rounded-3">

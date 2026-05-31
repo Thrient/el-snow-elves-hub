@@ -86,11 +86,12 @@ const RoutesPage: FC = () => {
             <div className="flex-1"><label className="text-[0.75rem] text-[#6b5e55] mb-1 block">标题 *</label><Input value={form.title} onChange={(e) => setF({ title: e.target.value })} placeholder="示例" /></div>
           </div>
           <div className="flex gap-3">
-            <div className="flex-1"><label className="text-[0.75rem] text-[#6b5e55] mb-1 block">图标</label><Select value={form.icon} onChange={(v) => setF({ icon: v })} options={iconOptions} allowClear placeholder="无" showSearch /></div>
+            <div className="flex-1"><label className="text-[0.75rem] text-[#6b5e55] mb-1 block">图标</label><Select value={form.icon} onChange={(v) => setF({ icon: v })} options={iconOptions} allowClear placeholder="无" showSearch popupMatchSelectWidth={false} dropdownStyle={{ minWidth: 200 }} /></div>
             <div className="flex-1"><label className="text-[0.75rem] text-[#6b5e55] mb-1 block">父级路由</label><Select value={form.parentId} onChange={(v) => setF({ parentId: v })} allowClear placeholder="无（顶级路由）" options={routes.map((r) => ({ value: r.id, label: `${r.path} (${r.title})` }))} showSearch /></div>
           </div>
           <div className="flex gap-3">
-            <div className="flex-1"><label className="text-[0.75rem] text-[#6b5e55] mb-1 block">权限码</label><Select value={form.perm} onChange={(v) => setF({ perm: v })} allowClear placeholder="无（公开路由）" options={allPerms.filter((p) => p.code !== "*").map((p) => ({ value: p.code, label: `${p.name} (${p.code})` }))} /></div>
+            <div className="flex-1"><label className="text-[0.75rem] text-[#6b5e55] mb-1 block">权限码</label><Select value={form.perm} onChange={(v) => setF({ perm: v })} allowClear placeholder="无（公开路由）" showSearch options={allPerms.filter((p) => p.code !== "*").map((p) => ({ value: p.code, label: `${p.name} (${p.code})` }))}
+              popupMatchSelectWidth={false} dropdownStyle={{ minWidth: 200 }} /></div>
             <div className="flex-1"><label className="text-[0.75rem] text-[#6b5e55] mb-1 block">组件</label><Select value={form.component} onChange={(v) => setF({ component: v })} options={getComponentNames().map((k) => ({ value: k, label: k }))} allowClear placeholder="无（通用页面）" showSearch /></div>
           </div>
           <div className="flex gap-3 items-center">

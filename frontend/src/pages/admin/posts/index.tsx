@@ -1,6 +1,6 @@
 import { useEffect, useState, type FC } from "react";
-import { Table, Button, Tag, Modal, Descriptions, Select, Space, Tabs, message } from "antd";
-import { EyeOutlined } from "@ant-design/icons";
+import { Table, Button, Tag, Modal, Descriptions, Select, Space, Tabs, Popconfirm, message } from "antd";
+import { EyeOutlined, DeleteOutlined } from "@ant-design/icons";
 import { adminApi } from "@/api/admin";
 import type { AdminPost } from "@/types";
 
@@ -26,34 +26,56 @@ const AdminPostsPage: FC = () => {
   const review = async (id: number, status: string) => {
     try {
       await adminApi.reviewPost(id, { status, reviewed: true });
-      message.success(status === "rejected" ? "已拒绝" : "已恢复");
+      message.success(status === "rejected" ? "已拒绝" : "已审核");
       load();
     } catch { /* ErrorToast */ }
   };
 
+  const remove = async (id: number) => {
+    try { await adminApi.reviewPost(id, { status: "rejected", reviewed: true }); message.success("已删除"); load(); }
+    catch { /* ErrorToast */ }
+  };
+
   return (
     <div className="pt-8 w-[min(94%,70rem)] mx-auto">
-      <h2 className="text-[1.125rem] font-600 text-[#3d3630] mb-2">帖子审核</h2>
-      <Tabs activeKey={filter} onChange={(k) => setFilter(k as any)} className="mb-1"
-        items={[{ key: "unreviewed", label: "未审核" }, { key: "all", label: "全部" }]}
-        tabBarExtraContent={
-          <Tabs activeKey={type} onChange={(k) => setType(k as any)}
-            items={[{ key: "threads", label: "帖子" }, { key: "replies", label: "评论" }]} />
-        } />
+      <div className="flex justify-between items-center mb-6">
+        <h2 className="text-[1.125rem] font-600 text-[#3d3630] m-0">帖子审核</h2>
+      </div>
+      <Tabs activeKey={`${filter}/${type}`} onChange={(k) => {
+        const [f, t] = k.split("/");
+        setFilter(f as any); setType(t as any);
+      }} className="mb-4"
+        items={[
+          { key: "unreviewed/threads", label: "未审核帖子" },
+          { key: "unreviewed/replies", label: "未审核评论" },
+          { key: "all/threads", label: "全部帖子" },
+          { key: "all/replies", label: "全部评论" },
+        ]} />
       <Table dataSource={posts} rowKey="id" loading={loading}
         pagination={{ pageSize: 20 }} className="bg-white rounded-3"
         columns={[
-          { title: "标题", dataIndex: "title", ellipsis: true, render: (v: string) => v || "—" },
-          { title: "作者", dataIndex: "author_name", width: 80 },
+          { title: type === "threads" ? "标题" : "内容", dataIndex: type === "threads" ? "title" : "content", ellipsis: true, width: type === "threads" ? undefined : 300,
+            render: (v: string) => v ? (v.length > 80 ? v.slice(0, 80) + "…" : v) : "—" },
+          { title: "用户", dataIndex: "author_name", width: 80 },
           { title: "状态", dataIndex: "status", width: 70,
             render: (s: string) => <Tag color={STATUS_MAP[s]?.color}>{STATUS_MAP[s]?.label}</Tag> },
-          { title: "操作", width: 180,
+          { title: "操作", width: 240,
             render: (_: unknown, record: AdminPost) => (
               <Space size={4}>
                 <Button size="small" type="text" icon={<EyeOutlined />} onClick={() => setDetail(record)} />
-                <Select size="small" value={record.status === "rejected" ? "rejected" : "approved"}
-                  onChange={(v) => review(record.id, v)}
-                  options={[{ value: "approved", label: "通过" }, { value: "rejected", label: "拒绝" }]} />
+                {record.reviewed ? (
+                  <Select size="small" value={record.status}
+                    onChange={(v) => review(record.id, v)}
+                    options={[{ value: "approved", label: "通过" }, { value: "rejected", label: "拒绝" }]} />
+                ) : (
+                  <>
+                    <Button size="small" type="primary" onClick={() => review(record.id, "approved")}>通过</Button>
+                    <Button size="small" danger onClick={() => review(record.id, "rejected")}>拒绝</Button>
+                    <Popconfirm title="确定删除?" onConfirm={() => remove(record.id)}>
+                      <Button size="small" type="text" danger icon={<DeleteOutlined />} />
+                    </Popconfirm>
+                  </>
+                )}
               </Space>
             ),
           },
