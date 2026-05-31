@@ -310,7 +310,7 @@ async def update_task_status(task_id: int, body: TaskStatusUpdate, db: AsyncSess
 # Posts / Comments Review
 # ═══════════════════════════════════════════
 
-@router.get("/posts", dependencies=[Depends(require_perm("forum:review"))])
+@router.get("/posts", dependencies=[Depends(require_perm("forum:review:list"))])
 async def list_posts(
     type: str = Query("threads"), reviewed: str = Query(""),
     db: AsyncSession = Depends(get_db),

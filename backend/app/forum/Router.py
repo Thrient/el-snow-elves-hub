@@ -213,7 +213,7 @@ async def create_reply(
     thread_id: int, body: ReplyCreate,
     user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
-    _=Depends(require_perm_any("forum:post")),
+    _=Depends(require_perm_any("forum:reply")),
     _v=Depends(require_verified),
 ):
     thread = (await db.execute(select(ForumPost).where(ForumPost.id == thread_id))).scalar_one_or_none()
@@ -333,7 +333,7 @@ async def admin_action(
 async def like_post(
     post_id: int, user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
-    _=Depends(require_perm_any("forum:post")),
+    _=Depends(require_perm_any("forum:like")),
     _v=Depends(require_verified),
 ):
     p = (await db.execute(select(ForumPost).where(ForumPost.id == post_id))).scalar_one_or_none()
