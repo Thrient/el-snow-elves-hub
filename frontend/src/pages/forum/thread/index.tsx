@@ -62,7 +62,7 @@ const ForumThreadPage: FC = () => {
         replies: [...prev.replies, reply],
       } : prev);
       message.success("回复成功");
-    } catch { message.error("回复失败"); }
+    } catch { /* ErrorToast */ }
     finally { setSubmitting(false); }
   };
 
@@ -73,7 +73,7 @@ const ForumThreadPage: FC = () => {
       await forumApi.updateThread(editId, { content: editContent });
       message.success("已更新"); setEditing(false);
       loadedRef.current = null; load();
-    } catch { message.error("编辑失败"); }
+    } catch { /* ErrorToast */ }
   };
 
   const handleDelete = (id: number, isThread: boolean) => {
@@ -84,7 +84,7 @@ const ForumThreadPage: FC = () => {
           await forumApi.deleteThread(id);
           message.success("已删除");
           if (isThread) navigate(-1); else { loadedRef.current = null; load(); }
-        } catch { message.error("删除失败"); }
+        } catch { /* ErrorToast */ }
       },
       okText: "删除", cancelText: "取消", okButtonProps: { danger: true },
     });
@@ -105,7 +105,7 @@ const ForumThreadPage: FC = () => {
           replies: prev.replies.map((r) => r.id === postId ? { ...r, liked, like_count } : r),
         };
       });
-    } catch { message.error("操作失败"); }
+    } catch { /* ErrorToast */ }
   };
 
   const handleAdmin = async (action: "pin" | "unpin" | "lock" | "unlock") => {
@@ -114,7 +114,7 @@ const ForumThreadPage: FC = () => {
       await forumApi.adminAction(thread.id, action);
       message.success("操作成功");
       loadedRef.current = null; load();
-    } catch { message.error("操作失败"); }
+    } catch { /* ErrorToast */ }
   };
 
   if (loading) return <div className="text-center py-20"><Spin size="large" /></div>;

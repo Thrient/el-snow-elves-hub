@@ -58,7 +58,7 @@ const UploadPage: FC = () => {
         cover: coverFile || undefined,
       });
       message.success("发布成功"); navigate("/market");
-    } catch { message.error("发布失败"); setPhase("complete"); }
+    } catch { setPhase("complete"); }
   };
 
   const step = !file ? 1 : fingerprintId ? 3 : 2;

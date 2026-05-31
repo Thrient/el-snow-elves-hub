@@ -61,7 +61,7 @@ const ProfilePage: FC = () => {
       setUsername(v);
       setEditing(false);
       message.success("已保存");
-    } catch { message.error("保存失败"); }
+    } catch { /* ErrorToast */ }
   };
 
   if (!user) return null;
@@ -115,7 +115,7 @@ const ProfilePage: FC = () => {
                         await authApi.changeEmail(newEmail);
                         message.success("验证邮件已发送到新邮箱");
                         setChangingEmail(false);
-                      } catch { message.error("更换失败"); }
+                      } catch { /* ErrorToast */ }
                     }}>保存</Button>
                     <Button size="small" onClick={() => setChangingEmail(false)}>取消</Button>
                   </div>

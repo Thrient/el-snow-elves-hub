@@ -92,11 +92,11 @@ const VersionsPage: FC = () => {
       message.success("版本已创建"); setOpen(false);
       setForm({ version: "", platform: "Windows x64", changelog: "", is_latest: false, is_mandatory: false });
       resetUpload(); load();
-    } catch { message.error("创建失败"); }
+    } catch { /* ErrorToast */ }
     finally { setLoading(false); setUploadStage("idle"); }
   };
 
-  const remove = async (id: number) => { try { await adminApi.deleteVersion(id); message.success("已删除"); load(); } catch { message.error("删除失败"); } };
+  const remove = async (id: number) => { try { await adminApi.deleteVersion(id); message.success("已删除"); load(); } catch { /* ErrorToast */ } };
 
   return (
     <div className="pt-8 w-[min(94%,70rem)] mx-auto">

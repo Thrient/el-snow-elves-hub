@@ -38,7 +38,7 @@ const ForumCreatePage: FC = () => {
       await forumApi.createThread({ title: title.trim(), content: content.trim(), board_id: boardId, image_ids: imageIds });
       message.success("发布成功");
       navigate(`/forum/${boardId}`, { replace: true });
-    } catch { message.error("发布失败"); }
+    } catch { /* ErrorToast */ }
     finally { setSubmitting(false); }
   };
 

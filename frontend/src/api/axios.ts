@@ -31,6 +31,10 @@ instance.interceptors.response.use(
         return instance(err.config);
       }
       bus.emit("auth:expired");
+    } else {
+      // 全局错误通知 — 后端返回 message 字段，校验错误已在后端统一为字符串
+      const msg = err.response?.data?.message || `请求错误 (${status})`;
+      bus.emit("app:error", msg);
     }
 
     return Promise.reject(err);

@@ -4,7 +4,7 @@ import { Button, Form, Input, message } from "antd";
 import { UserOutlined, MailOutlined, LockOutlined } from "@ant-design/icons";
 import { useAuthStore } from "@/store/auth";
 import { api } from "@/api/axios";
-import axios from "axios";
+import { bus } from "@/event/bus";
 
 type Mode = "login" | "register";
 
@@ -33,6 +33,17 @@ const LoginPage: FC = () => {
 
   const [verifyMsg, setVerifyMsg] = useState("");
 
+  // 监听全局错误事件，检测"请先验证邮箱"提示
+  useEffect(() => {
+    const handler = (msg: string) => {
+      if (msg === "请先验证邮箱后再登录") {
+        setVerifyMsg(form.getFieldValue("email"));
+      }
+    };
+    bus.on("app:error", handler);
+    return () => bus.off("app:error", handler);
+  }, []);
+
   const submit = async (values: { email: string; password: string; username?: string }) => {
     try {
       if (mode === "login") {
@@ -44,13 +55,8 @@ const LoginPage: FC = () => {
         message.info("注册成功，请查收验证邮件");
         setMode("login");
       }
-    } catch (err: unknown) {
-      if (!axios.isAxiosError(err)) return;
-      const msg = err.response?.data?.detail;
-      if (msg === "请先验证邮箱后再登录") {
-        setVerifyMsg(form.getFieldValue("email"));
-      }
-      message.error(msg || "请求失败");
+    } catch {
+      // 错误已由 ErrorToast 全局显示
     }
   };
 
@@ -60,7 +66,7 @@ const LoginPage: FC = () => {
       await api.post("/api/v1/auth/send-verification", { email: verifyMsg });
       message.success("验证邮件已重新发送，请查收");
       setVerifyMsg("");
-    } catch { message.error("发送失败"); }
+    } catch { /* 错误由 ErrorToast 显示 */ }
   };
 
   const delay = (base: number) => ({ animation: `fadeUp .5s ${(base + (mode === "register" ? 0.05 : 0))}s both` });

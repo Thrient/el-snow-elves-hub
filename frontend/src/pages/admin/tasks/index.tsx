@@ -25,13 +25,13 @@ const TasksPage: FC = () => {
   const changeStatus = async (id: number, status: string) => {
     setLoading(true);
     try { await adminApi.updateTaskStatus(id, status); message.success("状态已更新"); void load(); }
-    catch { message.error("操作失败"); }
+    catch { /* ErrorToast */ }
     finally { setLoading(false); }
   };
 
   const remove = async (id: number) => {
     try { await adminApi.deleteTask(id); message.success("已删除"); void load(); }
-    catch { message.error("删除失败"); }
+    catch { /* ErrorToast */ }
   };
 
   return (

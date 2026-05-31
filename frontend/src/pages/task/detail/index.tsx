@@ -21,7 +21,7 @@ const TaskDetailPage: FC = () => {
     if (!taskId) return;
     setLoading(true);
     try { const t = await taskApi.get(Number(taskId)); setTask(t); setComments(await taskApi.comments(Number(taskId))); }
-    catch { message.error("加载失败"); }
+    catch { /* ErrorToast */ }
     finally { setLoading(false); }
   };
 
@@ -33,7 +33,7 @@ const TaskDetailPage: FC = () => {
     try {
       const result = await taskApi.like(task.id);
       setTask({ ...task, liked: result.liked, like_count: result.like_count });
-    } catch { message.error("点赞失败"); }
+    } catch { /* ErrorToast */ }
   };
 
   const handleComment = async () => {

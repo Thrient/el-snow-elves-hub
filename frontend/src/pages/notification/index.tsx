@@ -31,7 +31,7 @@ const NotificationsPage: FC = () => {
 
   const handleMarkAll = async () => {
     try { await notificationApi.markAllRead(); message.success("已全部标记为已读"); load(page); }
-    catch { message.error("操作失败"); }
+    catch { /* ErrorToast */ }
   };
 
   const handleClick = async (n: NotificationItem) => {

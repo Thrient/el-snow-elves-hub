@@ -6,6 +6,7 @@ import { useAppRoutes } from "@/router";
 import { useAuthGuard } from "@/hooks/useAuthGuard";
 import { useNavigationGuard } from "@/router/guards";
 import AppHeader from "@/components/AppHeader";
+import ErrorToast from "@/components/ErrorToast";
 import { authApi } from "@/api/identity";
 
 
@@ -53,6 +54,7 @@ const AppLayout: FC = () => {
   return (
     <Layout style={{minHeight: "100vh", display: "flex", flexDirection: "column", background: "#faf7f1"}}>
       <AppHeader/>
+      <ErrorToast />
 
       {user && !user.email_verified && (
         <div className="flex items-center justify-center gap-3 px-4 py-2.5 text-[0.8125rem] text-[#6b5e55] bg-[#fef7e0] border-b border-solid border-[#f0d78c]">

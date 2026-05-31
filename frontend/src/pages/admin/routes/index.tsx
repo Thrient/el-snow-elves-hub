@@ -23,7 +23,7 @@ const RoutesPage: FC = () => {
   const load = async () => {
     setLoading(true);
     try { const [r, p] = await Promise.all([adminApi.listRoutes(), adminApi.listPermissions()]); setRoutes(r); setAllPerms(p); }
-    catch { message.error("加载失败"); } finally { setLoading(false); }
+    catch { /* ErrorToast */ } finally { setLoading(false); }
   };
 
   useEffect(() => { void load(); }, []);
@@ -38,12 +38,12 @@ const RoutesPage: FC = () => {
       if (editing) { await adminApi.updateRoute(editing.id, data); message.success("路由已更新"); }
       else { await adminApi.createRoute(data as any); message.success("路由已创建"); }
       setModalOpen(false); void load();
-    } catch { message.error("保存失败"); } finally { setSaving(false); }
+    } catch { /* ErrorToast */ } finally { setSaving(false); }
   };
 
-  const toggleEnabled = async (id: number, enabled: boolean) => { try { await adminApi.toggleRoute(id, enabled); setRoutes((prev) => prev.map((r) => (r.id === id ? { ...r, enabled } : r))); } catch { message.error("操作失败"); } };
-  const toggleInMenu = async (id: number, inMenu: boolean) => { try { await adminApi.updateRoute(id, { in_menu: inMenu } as any); setRoutes((prev) => prev.map((r) => (r.id === id ? { ...r, in_menu: inMenu } : r))); } catch { message.error("操作失败"); } };
-  const removeRoute = async (id: number) => { try { await adminApi.deleteRoute(id); message.success("已删除"); void load(); } catch { message.error("删除失败"); } };
+  const toggleEnabled = async (id: number, enabled: boolean) => { try { await adminApi.toggleRoute(id, enabled); setRoutes((prev) => prev.map((r) => (r.id === id ? { ...r, enabled } : r))); } catch { /* ErrorToast */ } };
+  const toggleInMenu = async (id: number, inMenu: boolean) => { try { await adminApi.updateRoute(id, { in_menu: inMenu } as any); setRoutes((prev) => prev.map((r) => (r.id === id ? { ...r, in_menu: inMenu } : r))); } catch { /* ErrorToast */ } };
+  const removeRoute = async (id: number) => { try { await adminApi.deleteRoute(id); message.success("已删除"); void load(); } catch { /* ErrorToast */ } };
 
   const setF = (patch: Partial<typeof form>) => setForm((p) => ({ ...p, ...patch }));
 

@@ -28,7 +28,7 @@ const RolesPage: FC = () => {
     try {
       const [r, p] = await Promise.all([adminApi.listRoles(), adminApi.listPermissions()]);
       setRoles(r); setAllPerms(p);
-    } catch { message.error("加载失败"); }
+    } catch { /* ErrorToast */ }
     finally { setLoading(false); }
   };
 
@@ -37,7 +37,7 @@ const RolesPage: FC = () => {
   const savePerms = async () => {
     if (!editRole) return;
     try { await adminApi.updateRolePermissions(editRole.id, selectedIds); message.success("权限已更新"); setEditRole(null); void load(); }
-    catch { message.error("更新失败"); }
+    catch { /* ErrorToast */ }
   };
 
   const createRole = async () => {

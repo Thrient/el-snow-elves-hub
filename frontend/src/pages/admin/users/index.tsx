@@ -21,7 +21,7 @@ const UsersPage: FC = () => {
     try {
       const [u, r] = await Promise.all([adminApi.listUsers(), adminApi.listRoles()]);
       setUsers(u); setRoles(r);
-    } catch { message.error("加载失败"); }
+    } catch { /* ErrorToast */ }
     finally { setLoading(false); }
   };
 
@@ -40,7 +40,7 @@ const UsersPage: FC = () => {
         permissions: editRoleIds.flatMap((rid) => roles.find((r) => r.id === rid)?.permissions.map((p) => p.code) || []),
       } : u));
       setEditUser(null);
-    } catch { message.error("更新失败"); }
+    } catch { /* ErrorToast */ }
     finally { setSaving(false); }
   };
 
@@ -49,7 +49,7 @@ const UsersPage: FC = () => {
       const res = await adminApi.disableUser(user.id);
       message.success(res.is_disabled ? "已禁用" : "已启用");
       setUsers((prev) => prev.map((u) => (u.id === user.id ? { ...u, is_disabled: res.is_disabled } : u)));
-    } catch { message.error("操作失败"); }
+    } catch { /* ErrorToast */ }
   };
 
   const deleteUser = async (user: AdminUser) => {
@@ -57,7 +57,7 @@ const UsersPage: FC = () => {
       await adminApi.deleteUser(user.id);
       message.success("已删除");
       setUsers((prev) => prev.filter((u) => u.id !== user.id));
-    } catch { message.error("删除失败"); }
+    } catch { /* ErrorToast */ }
   };
 
   const isSuperAdmin = (u: AdminUser) => u.permissions?.includes("*") || false;
