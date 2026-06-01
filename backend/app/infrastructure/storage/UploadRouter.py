@@ -7,13 +7,13 @@ from app.api.Deps import get_current_user, require_perm_any, require_verified
 from app.infrastructure.Response import ok
 from app.infrastructure.Limiter import get_limiter
 from app.infrastructure.storage.ChunkedUpload import chunked_upload
-from app.infrastructure.storage.StorageService import storage_service
 from app.identity.entity.User import User
 
 router = APIRouter(prefix="/uploads", tags=["断点续传"])
 _limiter = get_limiter()
 
 from app.infrastructure.storage.Schema.InitRequest import InitRequest
+from app.infrastructure.storage.Schema.CompleteRequest import CompleteRequest
 
 
 @router.post("/init")
@@ -47,14 +47,14 @@ async def upload_chunk(
 
 @router.post("/{upload_id}/complete")
 async def complete_upload(
-    request: Request, upload_id: str,
+    request: Request, upload_id: str, body: CompleteRequest,
     user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
     _=Depends(require_perm_any("file:upload:complete")),
     _v=Depends(require_verified),
 ):
     try:
-        fp, record = await chunked_upload.complete(db, upload_id)
+        fp, record = await chunked_upload.complete(db, upload_id, body.sha256)
     except ValueError as e:
         raise HTTPException(400, str(e))
     return ok({"record_id": record.id})
