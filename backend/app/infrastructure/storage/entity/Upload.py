@@ -22,6 +22,7 @@ class Upload(Base):
     total_chunks: Mapped[int] = mapped_column(Integer, nullable=False)
     uploaded_by: Mapped[int | None] = mapped_column(ForeignKey("users.id"), nullable=True)
     uploaded_chunks: Mapped[list | None] = mapped_column(JSON, default=list)
+    chunk_hashes: Mapped[dict | None] = mapped_column(JSON, nullable=True)
     status: Mapped[str] = mapped_column(String(16), default="uploading")
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     expires_at: Mapped[datetime] = mapped_column(
