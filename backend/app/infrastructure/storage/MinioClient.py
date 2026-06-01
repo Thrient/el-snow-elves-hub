@@ -59,6 +59,40 @@ class MinioClient:
         """删除对象"""
         self._client.delete_object(Bucket=self._bucket, Key=key)
 
+    def create_multipart_upload(self, key: str, content_type: str = "application/octet-stream") -> str:
+        """创建分片合并上传，返回 UploadId"""
+        resp = self._client.create_multipart_upload(
+            Bucket=self._bucket, Key=key, ContentType=content_type,
+        )
+        return resp["UploadId"]
+
+    def upload_part_copy(self, key: str, upload_id: str, part_number: int, source_key: str) -> dict:
+        """从已有对象复制一个分片（服务端操作，零数据传输）"""
+        resp = self._client.upload_part_copy(
+            Bucket=self._bucket, Key=key, UploadId=upload_id,
+            PartNumber=part_number,
+            CopySource={"Bucket": self._bucket, "Key": source_key},
+        )
+        return {"PartNumber": part_number, "ETag": resp["CopyPartResult"]["ETag"]}
+
+    def complete_multipart_upload(self, key: str, upload_id: str, parts: list[dict]):
+        """完成分片合并"""
+        self._client.complete_multipart_upload(
+            Bucket=self._bucket, Key=key, UploadId=upload_id,
+            MultipartUpload={"Parts": parts},
+        )
+
+    def delete_objects(self, keys: list[str]):
+        """批量删除对象（自动分片每 1000 个一批）"""
+        if not keys:
+            return
+        for i in range(0, len(keys), 1000):
+            batch = keys[i:i + 1000]
+            self._client.delete_objects(
+                Bucket=self._bucket,
+                Delete={"Objects": [{"Key": k} for k in batch]},
+            )
+
     def stream(self, key: str):
         """流式下载，返回 (generator, ContentType, ContentLength)
         用于大文件分块传输，避免一次性加载到内存
