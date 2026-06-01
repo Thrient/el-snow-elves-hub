@@ -28,8 +28,9 @@ class ForumPost(Base):
     view_count: Mapped[int] = mapped_column(Integer, default=0)
     reply_count: Mapped[int] = mapped_column(Integer, default=0)
     image_ids: Mapped[list | None] = mapped_column(JSON, default=list)
-    status: Mapped[str] = mapped_column(String(16), default="approved", comment="approved/rejected")
-    reviewed: Mapped[bool] = mapped_column(Boolean, default=False)
+    like_count: Mapped[int | None] = mapped_column(Integer, default=0)
+    status: Mapped[str | None] = mapped_column(String(16), default="approved", comment="approved/rejected")
+    reviewed: Mapped[bool | None] = mapped_column(Boolean, default=False)
     last_reply_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(
