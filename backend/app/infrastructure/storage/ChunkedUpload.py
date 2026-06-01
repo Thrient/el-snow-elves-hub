@@ -1,6 +1,5 @@
 """分块上传服务 — init / chunk / complete / cleanup"""
 import hashlib
-import io
 import logging
 from datetime import datetime, timezone
 
@@ -60,6 +59,7 @@ class ChunkedUpload:
             raise ValueError(f"分片未完整: {len(chunks)}/{upload.total_chunks}")
 
         from app.infrastructure.storage.entity.Fingerprint import Fingerprint
+        from app.infrastructure.storage.FileValidator import detect_type
 
         # 去重：sha256 已存在则跳过合并
         existing = (await db.execute(
@@ -79,7 +79,11 @@ class ChunkedUpload:
                 parts.append(result)
             minio.complete_multipart_upload(sha256, mp_id, parts)
 
-            fp = Fingerprint(sha256=sha256, size=upload.total_size)
+            # 从第一个分片检测文件类型（只读前几 KB）
+            first_chunk_data, _ = minio.download(f"chunks/{upload_id}/{chunks[0]}")
+            detected = detect_type(first_chunk_data)
+
+            fp = Fingerprint(sha256=sha256, size=upload.total_size, detected_type=detected)
             db.add(fp)
             await db.flush()
 
@@ -89,9 +93,12 @@ class ChunkedUpload:
             uploaded_by=upload.uploaded_by,
         )
 
-        # 批量删除分片
+        # 批量删除分片（容错：删除失败不阻塞完成流程）
         chunk_keys = [f"chunks/{upload_id}/{n}" for n in chunks]
-        minio.delete_objects(chunk_keys)
+        try:
+            minio.delete_objects(chunk_keys)
+        except Exception:
+            _log.warning(f"分片清理失败，残留 {len(chunk_keys)} 个对象于 chunks/{upload_id}/")
 
         await db.delete(upload)
         await db.commit()
@@ -103,13 +110,16 @@ class ChunkedUpload:
         return fp, record
 
     async def _verify_sha256(self, sha256: str):
-        """后台异步：下载文件验证 SHA256 是否匹配"""
+        """后台异步：流式下载文件验证 SHA256，避免大文件 OOM"""
         import hashlib as hl
         from app.infrastructure.Database import async_session
         from app.infrastructure.storage.entity.Fingerprint import Fingerprint
         try:
-            data, _ = minio.download(sha256)
-            actual = hl.sha256(data).hexdigest()
+            stream, _, _ = minio.stream(sha256)
+            h = hl.sha256()
+            for chunk in stream:
+                h.update(chunk)
+            actual = h.hexdigest()
             async with async_session() as db:
                 fp = (await db.execute(
                     select(Fingerprint).where(Fingerprint.sha256 == sha256)

@@ -18,8 +18,8 @@ export const uploadApi = {
     return api.post(`/api/v1/uploads/${uploadId}/chunk?n=${chunkIndex}`, form);
   },
 
-  complete: (uploadId: string): Promise<{ record_id: number }> =>
-    api.post<{ code: number; data: { record_id: number } }>(`/api/v1/uploads/${uploadId}/complete`).then((r) => r.data),
+  complete: (uploadId: string, sha256: string): Promise<{ record_id: number }> =>
+    api.post<{ code: number; data: { record_id: number } }>(`/api/v1/uploads/${uploadId}/complete`, { sha256 }).then((r) => r.data),
 };
 
 /**
@@ -40,7 +40,8 @@ export async function uploadFile(file: File, onProgress?: (pct: number) => void)
     onProgress?.(10 + Math.round((i + 1) / totalChunks * 90));
   }
 
-  return uploadApi.complete(session.upload_id);
+  onProgress?.(100);
+  return uploadApi.complete(session.upload_id, sha256);
 }
 
 export function computeSHA256(file: File, onProgress?: (pct: number) => void): Promise<string> {

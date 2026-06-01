@@ -83,13 +83,15 @@ class MinioClient:
         )
 
     def delete_objects(self, keys: list[str]):
-        """批量删除对象（最多 1000 个）"""
+        """批量删除对象（自动分片每 1000 个一批）"""
         if not keys:
             return
-        self._client.delete_objects(
-            Bucket=self._bucket,
-            Delete={"Objects": [{"Key": k} for k in keys]},
-        )
+        for i in range(0, len(keys), 1000):
+            batch = keys[i:i + 1000]
+            self._client.delete_objects(
+                Bucket=self._bucket,
+                Delete={"Objects": [{"Key": k} for k in batch]},
+            )
 
     def stream(self, key: str):
         """流式下载，返回 (generator, ContentType, ContentLength)
