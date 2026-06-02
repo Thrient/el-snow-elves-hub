@@ -2,4 +2,5 @@ from pydantic import BaseModel
 
 
 class CompleteRequest(BaseModel):
-    sha256: str
+    """Complete upload request — no client fields, backend computes hash"""
+    pass
