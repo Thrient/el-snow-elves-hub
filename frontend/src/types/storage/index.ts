@@ -6,5 +6,5 @@ export interface UploadSession {
 
 export interface FileCheckResult {
   exists: boolean;
-  record_id: number | null;
+  fingerprint_id: number | null;
 }

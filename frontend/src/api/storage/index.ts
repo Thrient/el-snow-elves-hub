@@ -1,12 +1,11 @@
 import { api } from "@/api/axios";
-import type { UploadSession } from "@/types";
 
 const CHUNK_SIZE = 5 * 1024 * 1024;       // 5MB
 const DIRECT_THRESHOLD = 5 * 1024 * 1024; // ≤5MB direct upload
 
-// ── Check result types ──
+// ── Check result ──
 interface BatchCheckResult {
-  existing: { sha256: string; record_id: number }[];
+  existing: { sha256: string; fingerprint_id: number }[];
   missing: string[];
 }
 
@@ -14,46 +13,38 @@ interface BatchCheckResult {
 export interface UploadResult {
   file: File;
   sha256: string;
-  record_id: number;
+  fingerprint_id: number;
 }
 
 // ── Internal API ──
 const uploadApi = {
-  /** Batch pre-check (always uses batch mode, single file wraps to array) */
   check: (sha256_list: string[]): Promise<BatchCheckResult> =>
     api.post<{ code: number; data: BatchCheckResult }>("/api/v1/files/check", { sha256: sha256_list })
       .then((r) => r.data),
 
-  /** Init chunked session (pass sha256 for server-side resume) */
-  init: (filename: string, totalSize: number, totalChunks: number, sha256?: string): Promise<UploadSession> =>
-    api.post<{ code: number; data: UploadSession }>("/api/v1/uploads/init", {
-      filename, total_size: totalSize, total_chunks: totalChunks, sha256,
-    }).then((r) => r.data),
-
-  /** Upload a single chunk */
-  uploadChunk: (uploadId: string, chunkIndex: number, blob: Blob) => {
-    const form = new FormData();
-    form.append("chunk", blob);
-    return api.post(`/api/v1/uploads/${uploadId}/chunk?n=${chunkIndex}`, form);
-  },
-
-  /** Query upload session status — for resume */
-  status: (uploadId: string): Promise<{
-    upload_id: string; filename: string; total_size: number;
-    total_chunks: number; uploaded_chunks: number[]; status: string;
+  init: (sha256: string, totalChunks: number, filename: string): Promise<{
+    exists: boolean; chunks: number[]; total_chunks: number;
   }> =>
-    api.get<{ code: number; data: any }>(`/api/v1/uploads/${uploadId}`).then((r) => r.data),
-
-  /** Complete chunked upload (no hash — backend computes from chunk data) */
-  complete: (uploadId: string): Promise<{ record_id: number }> =>
-    api.post<{ code: number; data: { record_id: number } }>(`/api/v1/uploads/${uploadId}/complete`, {})
+    api.post<{ code: number; data: any }>("/api/v1/uploads/init", { sha256, total_chunks: totalChunks, filename })
       .then((r) => r.data),
 
-  /** Small file direct upload (single request, server computes hash) */
-  direct: (file: File): Promise<{ record_id: number }> => {
+  chunk: (sha256: string, n: number, total: number, filename: string, blob: Blob) => {
+    const form = new FormData();
+    form.append("chunk", blob);
+    return api.post(
+      `/api/v1/uploads/chunk?sha256=${encodeURIComponent(sha256)}&n=${n}&total=${total}&filename=${encodeURIComponent(filename)}`,
+      form
+    );
+  },
+
+  complete: (sha256: string, totalChunks: number): Promise<{ fingerprint_id: number }> =>
+    api.post<{ code: number; data: { fingerprint_id: number } }>("/api/v1/uploads/complete", { sha256, total_chunks: totalChunks })
+      .then((r) => r.data),
+
+  direct: (file: File): Promise<{ fingerprint_id: number }> => {
     const form = new FormData();
     form.append("file", file);
-    return api.post<{ code: number; data: { record_id: number } }>("/api/v1/uploads/direct", form)
+    return api.post<{ code: number; data: { fingerprint_id: number } }>("/api/v1/uploads/direct", form)
       .then((r) => r.data);
   },
 };
@@ -104,28 +95,15 @@ function computeSHA256(file: File, onProgress?: (pct: number) => void): Promise<
 // ── Progress callback type ──
 export type UploadProgress = {
   phase: "hashing" | "checking" | "uploading" | "done";
-  current: number;   // current file index (0-based)
-  total: number;     // total file count
-  filePct?: number;  // current file progress (0-100)
+  current: number;
+  total: number;
+  filePct?: number;
 };
 
 // ══════════════════════════════════════════════════
 // Unified upload entry point
 // ══════════════════════════════════════════════════
 
-/**
- * Unified file/folder upload
- * - file ≤5MB: direct upload POST /uploads/direct
- * - file >5MB: chunked POST /uploads/init → chunk → complete
- * - Batch pre-check: single POST /files/check for all files
- * - Frontend computes SHA256 once per file
- * - Backend computes hash from uploaded data, complete doesn't pass hash
- * - Server-side resume: init with sha256, backend finds existing session
- *
- * @param items Single file, file array, or FileList
- * @param onProgress Optional progress callback
- * @returns Upload results array (same order as input)
- */
 export async function upload(
   items: File | File[] | FileList,
   onProgress?: (p: UploadProgress) => void,
@@ -138,7 +116,7 @@ export async function upload(
 
   const total = files.length;
 
-  // ── Phase 1: Compute SHA256 for each file (serial, one read each) ──
+  // ── Phase 1: Compute SHA256 ──
   onProgress?.({ phase: "hashing", current: 0, total, filePct: 0 });
   const filesWithHash: Array<{ file: File; sha256: string }> = [];
   for (let i = 0; i < files.length; i++) {
@@ -153,7 +131,7 @@ export async function upload(
   onProgress?.({ phase: "checking", current: 0, total, filePct: 0 });
   const sha256List = filesWithHash.map((f) => f.sha256);
   const { existing, missing } = await uploadApi.check(sha256List);
-  const existingMap = new Map(existing.map((e) => [e.sha256, e.record_id]));
+  const existingMap = new Map(existing.map((e) => [e.sha256, e.fingerprint_id]));
   const missingSet = new Set(missing);
 
   // ── Phase 3: Upload missing files ──
@@ -168,71 +146,58 @@ export async function upload(
     const uploadResult = await uploadSingle(file, sha256, (pct) => {
       onProgress?.({ phase: "uploading", current: uploadIndex, total: totalUpload, filePct: pct });
     });
-    results.push({ file, sha256, record_id: uploadResult.record_id });
+    results.push({ file, sha256, fingerprint_id: uploadResult.fingerprint_id });
     uploadIndex++;
   }
 
-  // ── Existing files: return known record_ids ──
+  // ── Existing files → return fingerprint_ids ──
   for (const { file, sha256 } of filesWithHash) {
-    const recordId = existingMap.get(sha256);
-    if (recordId != null) {
-      results.push({ file, sha256, record_id: recordId });
+    const fpId = existingMap.get(sha256);
+    if (fpId != null) {
+      results.push({ file, sha256, fingerprint_id: fpId });
     }
   }
 
-  // Sort by original order
   const resultMap = new Map(results.map((r) => [r.file, r]));
   onProgress?.({ phase: "done", current: total, total });
 
   return files.map((f) => resultMap.get(f)!);
 }
 
-// ── Single file upload dispatcher (with SHA256 server-side resume) ──
+// ── Single file dispatch ──
 async function uploadSingle(
-  file: File,
-  sha256: string,
+  file: File, sha256: string,
   onProgress?: (pct: number) => void,
-): Promise<{ record_id: number }> {
+): Promise<{ fingerprint_id: number }> {
   if (file.size <= DIRECT_THRESHOLD) {
-    // ── Small file: direct upload ──
     onProgress?.(50);
     const result = await uploadApi.direct(file);
     onProgress?.(100);
     return result;
   }
 
-  // ═══════════════════════════════════════════════
-  // ── Large file: chunked + SHA256 server resume ──
-  // ═══════════════════════════════════════════════
   const totalChunks = Math.ceil(file.size / CHUNK_SIZE);
 
-  // init with sha256 → backend finds existing session if same file was uploading
-  // Browser crash/restart + re-select file = same SHA256 = same session = chunks preserved
-  const session = await uploadApi.init(file.name, file.size, totalChunks, sha256);
-
-  // Query uploaded chunks (new session returns empty, resume returns existing)
-  const status = await uploadApi.status(session.upload_id);
-  const uploadedSet = new Set<number>(status.uploaded_chunks ?? []);
+  // init: query existing chunks (no session created)
+  const { chunks: existingChunks } = await uploadApi.init(sha256, totalChunks, file.name);
+  const uploadedSet = new Set(existingChunks);
 
   for (let i = 0; i < totalChunks; i++) {
-    if (uploadedSet.has(i)) {
-      onProgress?.(Math.round((i + 1) / totalChunks * 100));
-      continue;  // ← Skip already-uploaded chunks (resume)
-    }
-    const start = i * CHUNK_SIZE;
-    const blob = file.slice(start, Math.min(start + CHUNK_SIZE, file.size));
-    await uploadApi.uploadChunk(session.upload_id, i, blob);
+    if (uploadedSet.has(i)) continue;  // skip already-uploaded
+
+    const blob = file.slice(i * CHUNK_SIZE, Math.min((i + 1) * CHUNK_SIZE, file.size));
+    await uploadApi.chunk(sha256, i, totalChunks, file.name, blob);
     onProgress?.(Math.round((i + 1) / totalChunks * 100));
   }
 
   onProgress?.(100);
-  return uploadApi.complete(session.upload_id);
+  return uploadApi.complete(sha256, totalChunks);
 }
 
-// ── Legacy compatibility wrapper (single-file callers: task/forum) ──
-export async function uploadFile(file: File, onProgress?: (pct: number) => void): Promise<{ record_id: number }> {
+// ── Legacy wrapper ──
+export async function uploadFile(file: File, onProgress?: (pct: number) => void): Promise<{ fingerprint_id: number }> {
   const results = await upload(file, (p) => {
     if (p.total === 1) onProgress?.(p.filePct ?? 0);
   });
-  return { record_id: results[0].record_id };
+  return { fingerprint_id: results[0].fingerprint_id };
 }

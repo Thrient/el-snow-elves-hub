@@ -13,11 +13,11 @@ export const forumApi = {
   getThread: (id: number) =>
     api.get<{ code: number; data: ThreadDetail }>(`/api/v1/forum/threads/${id}`).then((r) => r.data),
 
-  createThread: (data: { title: string; content: string; board_id: number; image_ids?: number[] }) =>
+  createThread: (data: { title: string; content: string; board_id: number; image_fingerprint_ids?: number[] }) =>
     api.post("/api/v1/forum/threads", data),
 
-  createReply: (threadId: number, content: string, parent_id?: number, image_ids?: number[]) =>
-    api.post<{ code: number; data: ReplyItem }>(`/api/v1/forum/threads/${threadId}/replies`, { content, parent_id, image_ids }),
+  createReply: (threadId: number, content: string, parent_id?: number, image_fingerprint_ids?: number[]) =>
+    api.post<{ code: number; data: ReplyItem }>(`/api/v1/forum/threads/${threadId}/replies`, { content, parent_id, image_fingerprint_ids }),
 
   likePost: (postId: number) =>
     api.post<{ code: number; data: { liked: boolean; like_count: number } }>(`/api/v1/forum/posts/${postId}/like`),

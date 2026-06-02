@@ -24,9 +24,9 @@ export const taskApi = {
 
   createWithFileId: (params: {
     title: string; description: string; category: string;
-    tags: string; version: string; zip_record_id: number;
+    tags: string; version: string; zip_fingerprint_id: number;
     filename?: string;
-    cover_record_id?: number;
+    cover_fingerprint_id?: number;
   }) => {
     const fd = new FormData();
     fd.append("title", params.title);
@@ -34,9 +34,9 @@ export const taskApi = {
     fd.append("category", params.category);
     fd.append("tags", params.tags);
     fd.append("version", params.version);
-    fd.append("zip_record_id", String(params.zip_record_id));
+    fd.append("zip_fingerprint_id", String(params.zip_fingerprint_id));
     if (params.filename) fd.append("filename", params.filename);
-    if (params.cover_record_id) fd.append("cover_record_id", String(params.cover_record_id));
+    if (params.cover_fingerprint_id) fd.append("cover_fingerprint_id", String(params.cover_fingerprint_id));
     return api.post("/api/v1/tasks", fd);
   },
 

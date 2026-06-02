@@ -4,8 +4,13 @@ import { PlusOutlined, DeleteOutlined, FolderOpenOutlined } from "@ant-design/ic
 import { useAuthStore } from "@/store/auth";
 import { adminApi } from "@/api/admin";
 import { formatSize, formatSpeed } from "@/util/format";
-import { upload, type UploadProgress } from "@/api/storage";
 import type { AdminVersion } from "@/types";
+
+async function computeSHA256(file: File): Promise<string> {
+  const buffer = await file.arrayBuffer();
+  const hashBuffer = await crypto.subtle.digest("SHA-256", buffer);
+  return Array.from(new Uint8Array(hashBuffer)).map((b) => b.toString(16).padStart(2, "0")).join("");
+}
 
 type UploadStage = "idle" | "hashing" | "checking" | "uploading" | "creating";
 
@@ -19,83 +24,90 @@ const VersionsPage: FC = () => {
   const [uploadStage, setUploadStage] = useState<UploadStage>("idle");
   const [uploadBytes, setUploadBytes] = useState({ done: 0, total: 0 });
   const [uploadSpeed, setUploadSpeed] = useState(0);
-  const [files, setFiles] = useState<File[]>([]);
+  const [fileManifest, setFileManifest] = useState<Record<string, { sha256: string; fingerprint_id?: number; size: number; file: File }>>({});
   const canManage = useAuthStore((s) => s.hasPerm)("version:create");
 
   const load = () => adminApi.listVersions().then(setVersions);
   useEffect(() => { load(); }, []);
 
   const resetUpload = () => {
-    setFolderName(""); setFiles([]); setUploadStage("idle"); setUploadBytes({ done: 0, total: 0 });
+    setFolderName(""); setFileManifest({}); setUploadStage("idle"); setUploadBytes({ done: 0, total: 0 });
     if (folderInputRef.current) folderInputRef.current.value = "";
   };
 
-  const handleFolderSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const selected = e.target.files;
-    if (!selected || selected.length === 0) return;
-    const fileList = Array.from(selected);
+  const handleFolderSelect = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const files = e.target.files;
+    if (!files || files.length === 0) return;
+    const fileList = Array.from(files);
     const rootName = (fileList[0].webkitRelativePath || "").split("/")[0] || "unknown";
     const totalSize = fileList.reduce((s, f) => s + f.size, 0);
-    setFolderName(rootName);
-    setFiles(fileList);
-    setUploadBytes({ done: 0, total: totalSize });
+    setFolderName(rootName); setUploadStage("hashing"); setUploadBytes({ done: 0, total: totalSize });
+    const manifest: Record<string, { sha256: string; fingerprint_id?: number; size: number; file: File }> = {};
+    let hashedBytes = 0;
+    for (let i = 0; i < fileList.length; i++) {
+      const file = fileList[i];
+      const parts = (file.webkitRelativePath || file.name).split("/");
+      const relPath = parts.length > 1 ? parts.slice(1).join("/") : (file.webkitRelativePath || file.name);
+      manifest[relPath] = { sha256: await computeSHA256(file), size: file.size, file };
+      hashedBytes += file.size;
+      setUploadBytes({ done: hashedBytes, total: totalSize });
+    }
+    setFileManifest(manifest); setUploadStage("idle");
   };
 
   const create = async () => {
     if (!form.version) return message.warning("请填写版本号");
-    if (files.length === 0) return message.warning("请选择版本文件夹");
+    if (Object.keys(fileManifest).length === 0) return message.warning("请选择版本文件夹");
     setLoading(true);
     try {
-      // Unified upload — upload() handles: hash → batch pre-check → dispatch direct/chunked
-      let speedTimer = performance.now();
-      let speedBytes = 0;
-      const results = await upload(files, (p: UploadProgress) => {
-        setUploadStage(
-          p.phase === "hashing" ? "hashing" :
-          p.phase === "checking" ? "checking" :
-          p.phase === "uploading" ? "uploading" :
-          p.phase === "done" ? "creating" : "idle"
-        );
-        if (p.phase === "uploading" && p.filePct != null) {
-          const now = performance.now();
-          const elapsed = now - speedTimer;
-          speedBytes += (p.filePct / 100) * (files[p.current]?.size ?? 0);
-          if (elapsed > 500) {
-            setUploadSpeed(speedBytes / elapsed * 1000);
-            speedTimer = now;
-            speedBytes = 0;
-          }
-          setUploadBytes({
-            done: files.slice(0, p.current).reduce((s, f) => s + f.size, 0) +
-              Math.round((p.filePct / 100) * (files[p.current]?.size ?? 0)),
-            total: files.reduce((s, f) => s + f.size, 0),
+      const entries = Object.entries(fileManifest);
+      const shaList = entries.map(([, v]) => v.sha256);
+      setUploadStage("checking"); setUploadBytes({ done: 0, total: 0 });
+      const { existing, missing } = await adminApi.checkBlobs(shaList);
+      // Capture fingerprint_ids from pre-check
+      const existingMap = new Map(existing.map((e) => [e.sha256, e.fingerprint_id]));
+      const updatedManifest = { ...fileManifest };
+      for (const [path, info] of Object.entries(updatedManifest)) {
+        const fpId = existingMap.get(info.sha256);
+        if (fpId != null) updatedManifest[path] = { ...info, fingerprint_id: fpId };
+      }
+      setFileManifest(updatedManifest);
+      if (missing.length > 0) {
+        const missingSet = new Set(missing);
+        const missingFiles = entries.filter(([, { sha256 }]) => missingSet.has(sha256));
+        const totalBytes = missingFiles.reduce((s, [, { size }]) => s + size, 0);
+        setUploadStage("uploading"); setUploadBytes({ done: 0, total: totalBytes });
+        let uploadedBytes = 0;
+        for (const [path, { size, file }] of missingFiles) {
+          const t0 = performance.now();
+          const result = await adminApi.uploadBlob(file, (pct) => {
+            const currentFileBytes = Math.round(size * pct / 100);
+            setUploadBytes({ done: uploadedBytes + currentFileBytes, total: totalBytes });
+            const elapsed = performance.now() - t0;
+            if (elapsed > 0) setUploadSpeed(currentFileBytes / elapsed * 1000);
           });
+          updatedManifest[path] = { ...updatedManifest[path], fingerprint_id: result.fingerprint_id };
+          uploadedBytes += size;
+          setUploadBytes({ done: uploadedBytes, total: totalBytes });
         }
-      });
-
-      // Build version manifest (relative path = webkitRelativePath minus root folder)
-      const fileEntries = results.map((r, i) => {
-        const parts = (files[i].webkitRelativePath || files[i].name).split("/");
-        const relPath = parts.length > 1 ? parts.slice(1).join("/") : (files[i].webkitRelativePath || files[i].name);
-        return { path: relPath, sha256: r.sha256 };
-      });
-
+        setUploadSpeed(0);
+        setFileManifest(updatedManifest);
+      }
       setUploadStage("creating");
       await adminApi.createVersion({
         version: form.version, platform: form.platform, changelog: form.changelog || undefined,
         is_latest: form.is_latest, is_mandatory: form.is_mandatory,
-        files: fileEntries,
+        files: Object.entries(updatedManifest).map(([path, { fingerprint_id }]) => ({ path, fingerprint_id: fingerprint_id! })),
       });
       message.success("版本已创建"); setOpen(false);
       setForm({ version: "", platform: "Windows x64", changelog: "", is_latest: false, is_mandatory: false });
       resetUpload(); load();
-    } catch { /* ErrorToast handled by axios interceptor */ }
-    finally { setLoading(false); setUploadStage("idle"); setUploadSpeed(0); }
+    } catch { /* ErrorToast */ }
+    finally { setLoading(false); setUploadStage("idle"); }
   };
 
   const remove = async (id: number) => { try { await adminApi.deleteVersion(id); message.success("已删除"); load(); } catch { /* ErrorToast */ } };
 
-  // ── JSX follows (unchanged from current lines 101-180) ──
   return (
     <div className="pt-8 w-[min(94%,70rem)] mx-auto">
       <div className="flex justify-between items-center mb-6">
@@ -142,14 +154,14 @@ const VersionsPage: FC = () => {
               <div className="flex items-center gap-2 mb-1">
                 <FolderOpenOutlined className="text-[#16a34a] text-base" />
                 <span className="text-[0.8125rem] font-500 text-[#166534]">{folderName}</span>
-                <span className="text-[0.75rem] text-[#6b5e55]">({files.length} 个文件)</span>
+                <span className="text-[0.75rem] text-[#6b5e55]">({Object.keys(fileManifest).length} 个文件)</span>
                 <Button type="link" size="small" onClick={resetUpload} className="ml-auto">重新选择</Button>
               </div>
               {uploadStage === "hashing" && (
                 <div className="mt-1"><Progress percent={Math.round(uploadBytes.total > 0 ? (uploadBytes.done / uploadBytes.total) * 100 : 0)} size="small" status="active" /><p className="text-[0.6875rem] text-[#6b5e55] m-0 mt-0.5">计算指纹 {formatSize(uploadBytes.done)} / {formatSize(uploadBytes.total)}</p></div>
               )}
               {uploadStage === "checking" && (
-                <p className="text-[0.6875rem] text-[#6b5e55] m-0 mt-1">检测已存在的文件... {files.length} 个文件，共 {formatSize(uploadBytes.total)}</p>
+                <p className="text-[0.6875rem] text-[#6b5e55] m-0 mt-1">检测已存在的文件... {Object.keys(fileManifest).length} 个文件，共 {formatSize(uploadBytes.total)}</p>
               )}
               {uploadStage === "uploading" && (
                 <div className="mt-1">

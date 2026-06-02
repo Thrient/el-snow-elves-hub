@@ -30,7 +30,7 @@ const UploadPage: FC = () => {
         setProgress(pct);
         setUploadedBytes(Math.round(f.size * pct / 100));
       });
-      setZipRecordId(result.record_id);
+      setZipRecordId(result.fingerprint_id);
       setUploadedBytes(f.size); setProgress(100);
       setPhase("complete");
     } catch {
@@ -42,7 +42,7 @@ const UploadPage: FC = () => {
     setCoverFile(f); setCoverUploading(true);
     try {
       const result = await uploadFile(f);
-      setCoverRecordId(result.record_id);
+      setCoverRecordId(result.fingerprint_id);
     } catch { setCoverFile(null); }
     finally { setCoverUploading(false); }
   };
@@ -64,8 +64,8 @@ const UploadPage: FC = () => {
         title: form.title.trim(), description: form.description.trim(),
         category: "综合", tags: form.tags.trim(),
         version: form.version.trim() || "1.0.0",
-        zip_record_id: zipRecordId, filename: file?.name,
-        cover_record_id: coverRecordId || undefined,
+        zip_fingerprint_id: zipRecordId, filename: file?.name,
+        cover_fingerprint_id: coverRecordId || undefined,
       });
       message.success("发布成功"); navigate("/market");
     } catch { setPhase("complete"); }
