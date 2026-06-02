@@ -2,7 +2,12 @@ from pydantic import BaseModel
 
 
 class InitRequest(BaseModel):
-    filename: str
-    total_size: int
+    sha256: str
     total_chunks: int
-    sha256: str | None = None
+    filename: str
+
+
+class InitResponse(BaseModel):
+    exists: bool
+    chunks: list[int]
+    total_chunks: int

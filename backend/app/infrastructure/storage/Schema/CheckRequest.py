@@ -8,3 +8,8 @@ class CheckRequest(BaseModel):
         if isinstance(self.sha256, str):
             return [self.sha256]
         return self.sha256
+
+
+class ExistingFile(BaseModel):
+    sha256: str
+    fingerprint_id: int

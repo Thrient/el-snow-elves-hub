@@ -38,7 +38,7 @@ API_PERMS: set[str] = {
     "forum:post", "forum:reply", "forum:update", "forum:delete",
     "forum:manage", "forum:like",
     # file/upload
-    "file:check", "file:upload:init", "file:upload:chunk", "file:upload:complete",
+    "file:check", "file:upload:init", "file:upload:chunk", "file:upload:complete", "file:upload:direct",
     # wildcard + admin access
     "*", "admin:access",
 }
