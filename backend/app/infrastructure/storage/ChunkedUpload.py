@@ -16,10 +16,22 @@ _log = logging.getLogger("Elves.ChunkedUpload")
 class ChunkedUpload:
     """管理分块上传的完整生命周期"""
 
-    async def init(self, db: AsyncSession, filename: str, total_size: int, total_chunks: int, uploaded_by: int | None = None) -> Upload:
+    async def init(self, db: AsyncSession, filename: str, total_size: int, total_chunks: int,
+                   uploaded_by: int | None = None, sha256: str | None = None) -> Upload:
+        # SHA256 resume: reuse existing session for same file
+        if sha256:
+            existing = (await db.execute(
+                select(Upload).where(
+                    Upload.sha256 == sha256,
+                    Upload.status == "uploading",
+                )
+            )).scalar_one_or_none()
+            if existing:
+                return existing
+
         upload = Upload(
             filename=filename, total_size=total_size, total_chunks=total_chunks,
-            uploaded_by=uploaded_by,
+            uploaded_by=uploaded_by, sha256=sha256,
         )
         db.add(upload)
         await db.commit()
