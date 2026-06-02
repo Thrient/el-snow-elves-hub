@@ -1,7 +1,7 @@
 import { useState, useRef, type FC, type DragEvent } from "react";
 import { Button, Spin, message } from "antd";
 import { PictureOutlined, DeleteOutlined } from "@ant-design/icons";
-import { forumApi } from "@/api/forum";
+import { upload } from "@/api/storage";
 
 export interface UploadedImage {
   file: File;
@@ -28,16 +28,19 @@ const ImageUpload: FC<Props> = ({ images, setImages }) => {
     }));
     setImages((prev) => [...prev, ...news]);
 
-    for (const file of arr) {
-      try {
-        const res = await forumApi.uploadImage(file);
+    // Batch upload — single pre-check covers all images
+    try {
+      const results = await upload(arr);
+      for (const { file, record_id } of results) {
         setImages((prev) => prev.map((img) =>
-          img.file === file ? { ...img, uploading: false, fileId: res.record_id } : img));
-      } catch {
-        setImages((prev) => prev.map((img) =>
-          img.file === file ? { ...img, uploading: false } : img));
-        message.error(`${file.name} 上传失败`);
+          img.file === file ? { ...img, uploading: false, fileId: record_id } : img));
       }
+    } catch {
+      setImages((prev) => prev.map((img) => {
+        const matched = arr.find((f) => f === img.file);
+        return matched ? { ...img, uploading: false } : img;
+      }));
+      message.error("部分图片上传失败");
     }
   };
 
