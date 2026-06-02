@@ -5,9 +5,12 @@ import pytest_asyncio
 
 
 def pytest_configure(config):
-    """在 pytest 收集测试前设置 RABBITMQ_URL"""
+    """在 pytest 收集测试前设置必要的环境变量"""
     import os
-    os.environ["RABBITMQ_URL"] = "amqp://elsnow:MqSnowElf2024@192.168.3.21:5672/"
+    os.environ.setdefault("RABBITMQ_URL", "amqp://elsnow:MqSnowElf2024@192.168.3.21:5672/")
+    os.environ.setdefault("SECRET_KEY", "test-secret-key-for-tests-only")
+    os.environ.setdefault("DATABASE_URL", "mysql+aiomysql://test:test@localhost:3306/test_db")
+    os.environ.setdefault("JWT_SECRET", "test-jwt-secret-for-tests-only")
 
 
 @pytest_asyncio.fixture(autouse=True)
