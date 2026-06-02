@@ -41,8 +41,12 @@ async def check_file(
         fp_id = fp_map.get(body.sha256)
         rec_id = rec_map.get(fp_id) if fp_id else None
         return ok({"exists": fp_id is not None, "record_id": rec_id})
-    existing_hashes = [h for h in hashes if h in fp_map]
+    # 批量模式：返回 record_id 以及哈希，消费端无需二次查询
+    existing = [
+        {"sha256": h, "record_id": rec_map.get(fp_map[h])}
+        for h in hashes if h in fp_map and rec_map.get(fp_map[h]) is not None
+    ]
     return ok({
-        "existing": existing_hashes,
+        "existing": existing,
         "missing": [h for h in hashes if h not in fp_map],
     })

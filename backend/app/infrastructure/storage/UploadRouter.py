@@ -18,6 +18,47 @@ from app.infrastructure.storage.Schema.InitRequest import InitRequest
 from app.infrastructure.storage.Schema.CompleteRequest import CompleteRequest
 
 
+@router.get("/{upload_id}")
+async def get_upload_status(
+    upload_id: str,
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+    _=Depends(require_perm_any("file:upload:chunk")),
+    _v=Depends(require_verified),
+):
+    """查询上传会话状态 — 用于断点续传，返回已上传分片列表"""
+    upload = (await db.execute(
+        select(Upload).where(Upload.upload_id == upload_id)
+    )).scalar_one_or_none()
+    if not upload:
+        raise HTTPException(404, "上传会话不存在或已过期")
+    return ok({
+        "upload_id": upload.upload_id,
+        "filename": upload.filename,
+        "total_size": upload.total_size,
+        "total_chunks": upload.total_chunks,
+        "uploaded_chunks": upload.uploaded_chunks or [],
+        "chunk_hashes": upload.chunk_hashes or {},
+        "status": upload.status,
+    })
+
+
+@router.post("/direct")
+@_limiter.limit("60/minute")
+async def direct_upload(
+    request: Request,
+    file: UploadFile,
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+    _=Depends(require_perm_any("file:upload:direct")),
+    _v=Depends(require_verified),
+):
+    """小文件直传 — 一次请求完成上传，服务端计算哈希"""
+    data = await file.read()
+    record = await chunked_upload.direct_upload(db, file.filename or "untitled", data, user.id)
+    return ok({"record_id": record.id})
+
+
 @router.post("/init")
 @_limiter.limit("60/minute")
 async def init_upload(
@@ -55,16 +96,8 @@ async def complete_upload(
     _=Depends(require_perm_any("file:upload:complete")),
     _v=Depends(require_verified),
 ):
-    # Backend computes hash: read sha256 from the upload session
-    upload = (await db.execute(
-        select(Upload).where(Upload.upload_id == upload_id)
-    )).scalar_one_or_none()
-    if not upload:
-        raise HTTPException(400, "上传会话不存在或已过期")
-    if not upload.sha256:
-        raise HTTPException(400, "上传会话缺少 sha256，请重新初始化上传")
     try:
-        fp, record = await chunked_upload.complete(db, upload_id, upload.sha256)
+        fp, record = await chunked_upload.complete(db, upload_id)
     except ValueError as e:
         raise HTTPException(400, str(e))
     return ok({"record_id": record.id})

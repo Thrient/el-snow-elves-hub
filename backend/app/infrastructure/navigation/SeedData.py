@@ -38,6 +38,7 @@ PERMISSION_CODES: dict[str, str] = {
     "file:upload:init": "上传初始化",
     "file:upload:chunk": "上传分片",
     "file:upload:complete": "上传完成",
+    "file:upload:direct": "小文件直传",
     "task:list": "查看任务列表",
     "task:rankings": "查看排行榜",
     "task:user": "查看用户任务",

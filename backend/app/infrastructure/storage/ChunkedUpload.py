@@ -59,7 +59,7 @@ class ChunkedUpload:
         await db.commit()
         return upload
 
-    async def complete(self, db: AsyncSession, upload_id: str, sha256: str):
+    async def complete(self, db: AsyncSession, upload_id: str):
         upload = (await db.execute(
             select(Upload).where(Upload.upload_id == upload_id)
         )).scalar_one_or_none()
@@ -73,29 +73,36 @@ class ChunkedUpload:
         from app.infrastructure.storage.entity.Fingerprint import Fingerprint
         from app.infrastructure.storage.FileValidator import detect_type
 
-        # 去重：sha256 已存在则跳过合并
+        # Stream all chunks from MinIO, accumulate full file SHA256
+        h = hashlib.sha256()
+        first_chunk_data: bytes | None = None
+        for n in chunks:
+            data, _ = minio.download(f"chunks/{upload_id}/{n}")
+            h.update(data)
+            if first_chunk_data is None:
+                first_chunk_data = data
+        full_hash = h.hexdigest()
+
+        # Dedup
         existing = (await db.execute(
-            select(Fingerprint).where(Fingerprint.sha256 == sha256)
+            select(Fingerprint).where(Fingerprint.sha256 == full_hash)
         )).scalar_one_or_none()
 
         if existing:
             fp = existing
         else:
-            # 服务端合并（UploadPartCopy，数据不经过后端）
-            mp_id = minio.create_multipart_upload(sha256)
+            # Server-side merge (UploadPartCopy — data never hits backend)
+            mp_id = minio.create_multipart_upload(full_hash)
             parts = []
             for i, n in enumerate(chunks, start=1):
                 result = minio.upload_part_copy(
-                    sha256, mp_id, i, f"chunks/{upload_id}/{n}"
+                    full_hash, mp_id, i, f"chunks/{upload_id}/{n}"
                 )
                 parts.append(result)
-            minio.complete_multipart_upload(sha256, mp_id, parts)
+            minio.complete_multipart_upload(full_hash, mp_id, parts)
 
-            # 从第一个分片检测文件类型（只读前几 KB）
-            first_chunk_data, _ = minio.download(f"chunks/{upload_id}/{chunks[0]}")
             detected = detect_type(first_chunk_data)
-
-            fp = Fingerprint(sha256=sha256, size=upload.total_size, detected_type=detected)
+            fp = Fingerprint(sha256=full_hash, size=upload.total_size, detected_type=detected)
             db.add(fp)
             await db.flush()
 
@@ -105,7 +112,7 @@ class ChunkedUpload:
             uploaded_by=upload.uploaded_by,
         )
 
-        # 批量删除分片（容错：删除失败不阻塞完成流程）
+        # Clean up chunks (best-effort)
         chunk_keys = [f"chunks/{upload_id}/{n}" for n in chunks]
         try:
             minio.delete_objects(chunk_keys)
@@ -115,36 +122,34 @@ class ChunkedUpload:
         await db.delete(upload)
         await db.commit()
 
-        # 异步验证 SHA256（后台任务，不阻塞返回）
-        import asyncio
-        asyncio.create_task(self._verify_sha256(sha256))
-
         return fp, record
 
-    async def _verify_sha256(self, sha256: str):
-        """后台异步：流式下载文件验证 SHA256，避免大文件 OOM"""
-        import hashlib as hl
-        from app.infrastructure.Database import async_session
+    async def direct_upload(self, db: AsyncSession, filename: str, data: bytes, uploaded_by: int | None = None):
+        """Small file direct upload — hash, dedup, store in one request"""
         from app.infrastructure.storage.entity.Fingerprint import Fingerprint
-        try:
-            stream, _, _ = minio.stream(sha256)
-            h = hl.sha256()
-            for chunk in stream:
-                h.update(chunk)
-            actual = h.hexdigest()
-            async with async_session() as db:
-                fp = (await db.execute(
-                    select(Fingerprint).where(Fingerprint.sha256 == sha256)
-                )).scalar_one_or_none()
-                if fp:
-                    fp.verified = (actual == sha256)
-                    await db.commit()
-                    if fp.verified:
-                        _log.info(f"SHA256 验证通过: {sha256[:16]}...")
-                    else:
-                        _log.error(f"SHA256 验证失败: expected={sha256[:16]}..., actual={actual[:16]}...")
-        except Exception as e:
-            _log.error(f"SHA256 异步验证异常: {e}")
+        from app.infrastructure.storage.FileValidator import detect_type
+
+        sha256 = hashlib.sha256(data).hexdigest()
+
+        # Dedup
+        existing = (await db.execute(
+            select(Fingerprint).where(Fingerprint.sha256 == sha256)
+        )).scalar_one_or_none()
+
+        if existing:
+            fp = existing
+        else:
+            detected = detect_type(data)
+            minio.upload(sha256, data, "application/octet-stream")
+            fp = Fingerprint(sha256=sha256, size=len(data), detected_type=detected)
+            db.add(fp)
+            await db.flush()
+
+        record = await storage_service.create_record(
+            db, fp, filename=filename, uploaded_by=uploaded_by,
+        )
+        await db.commit()
+        return record
 
     async def cleanup_expired(self, db: AsyncSession) -> int:
         """清理过期的上传会话及分片，返回清理数量"""
@@ -158,7 +163,7 @@ class ChunkedUpload:
         )
         expired = result.scalars().all()
         for u in expired:
-            for n in range(u.total_chunks):
+            for n in (u.uploaded_chunks or []):
                 try:
                     minio.delete(f"chunks/{u.upload_id}/{n}")
                 except Exception:
