@@ -197,9 +197,19 @@ async def create_thread(
     board = (await db.execute(select(ForumBoard).where(ForumBoard.id == body.board_id))).scalar_one_or_none()
     if not board:
         raise HTTPException(400, "板块不存在")
+
+    # Create FileRecords from fingerprint_ids
+    record_ids: list[int] = []
+    if body.image_fingerprint_ids:
+        for fp_id in body.image_fingerprint_ids:
+            record = await storage_service.create_record_from_fingerprint(
+                db, fp_id, filename="forum_image", uploaded_by=user.id,
+            )
+            record_ids.append(record.id)
+
     p = ForumPost(
         title=body.title, content=body.content, author_id=user.id,
-        board_id=body.board_id, image_ids=body.image_ids or [],
+        board_id=body.board_id, image_ids=record_ids,
     )
     db.add(p)
     await db.commit()
@@ -236,10 +246,19 @@ async def create_reply(
             parent_auth = parent.author.username if parent.author else None
             parent_content = parent.content
 
+    # Create FileRecords from fingerprint_ids
+    record_ids: list[int] = []
+    if body.image_fingerprint_ids:
+        for fp_id in body.image_fingerprint_ids:
+            record = await storage_service.create_record_from_fingerprint(
+                db, fp_id, filename="forum_image", uploaded_by=user.id,
+            )
+            record_ids.append(record.id)
+
     r = ForumPost(
         content=body.content, author_id=user.id, board_id=thread.board_id,
         parent_id=body.parent_id or thread_id, thread_id=thread_id,
-        image_ids=body.image_ids or [],
+        image_ids=record_ids,
     )
     db.add(r)
     thread.reply_count += 1
@@ -267,7 +286,7 @@ async def create_reply(
         parent_id=r.parent_id if r.parent_id != thread_id else None,
         parent_author=parent_auth,
         parent_content=parent_content,
-        image_urls=await _resolve_images(db, body.image_ids), like_count=0, liked=False,
+        image_urls=await _resolve_images(db, record_ids), like_count=0, liked=False,
         created_at=r.created_at, updated_at=r.updated_at,
     ))
 

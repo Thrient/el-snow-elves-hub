@@ -6,7 +6,7 @@ _NO_HTML = re.compile(r"[<>]")
 
 
 class ReplyCreate(BaseModel):
-    content: str; parent_id: int | None = None; image_ids: list[int] | None = None
+    content: str; parent_id: int | None = None; image_fingerprint_ids: list[int] | None = None
 
     @classmethod
     @field_validator("content")

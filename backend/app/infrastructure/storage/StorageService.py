@@ -53,6 +53,29 @@ class StorageService:
         return record
 
     @staticmethod
+    async def create_record_from_fingerprint(
+        db: AsyncSession,
+        fingerprint_id: int,
+        filename: str,
+        uploaded_by: int,
+    ) -> FileRecord:
+        """Create FileRecord from a fingerprint_id. Called by business APIs."""
+        fp = (await db.execute(
+            select(Fingerprint).where(Fingerprint.id == fingerprint_id)
+        )).scalar_one_or_none()
+        if not fp:
+            raise ValueError(f"指纹不存在: {fingerprint_id}")
+        record = FileRecord(
+            fingerprint_id=fp.id,
+            filename=filename,
+            size=fp.size,
+            uploaded_by=uploaded_by,
+        )
+        db.add(record)
+        await db.flush()
+        return record
+
+    @staticmethod
     def url(fp: Fingerprint | None) -> str | None:
         """生成预签名下载链接"""
         if not fp:

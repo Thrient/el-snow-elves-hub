@@ -6,7 +6,7 @@ _NO_HTML = re.compile(r"[<>]")
 
 
 class ThreadCreate(BaseModel):
-    title: str; content: str; board_id: int; image_ids: list[int] | None = None
+    title: str; content: str; board_id: int; image_fingerprint_ids: list[int] | None = None
 
     @classmethod
     @field_validator("title", "content")
