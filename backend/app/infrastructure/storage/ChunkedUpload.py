@@ -125,15 +125,24 @@ class ChunkedUpload:
             if fp:
                 return {"fingerprint_id": fp.id}
 
-            # 6. MinIO multipart copy 组装
-            mp_id = minio.create_multipart_upload(full_hash)
-            parts = []
-            for i in range(total_chunks):
-                result = minio.upload_part_copy(
-                    full_hash, mp_id, i + 1, f"chunks/{sha256}/{i}"
-                )
-                parts.append(result)
-            minio.complete_multipart_upload(full_hash, mp_id, parts)
+            # 6. MinIO multipart copy 组装（异常时 abort 防止对象存储泄露）
+            mp_id = None
+            try:
+                mp_id = minio.create_multipart_upload(full_hash)
+                parts = []
+                for i in range(total_chunks):
+                    result = minio.upload_part_copy(
+                        full_hash, mp_id, i + 1, f"chunks/{sha256}/{i}"
+                    )
+                    parts.append(result)
+                minio.complete_multipart_upload(full_hash, mp_id, parts)
+            except Exception:
+                if mp_id:
+                    try:
+                        minio.abort_multipart_upload(full_hash, mp_id)
+                    except Exception:
+                        _log.warning(f"abort multipart upload 失败: {full_hash}")
+                raise
 
             # 7. 创建 Fingerprint（只建指纹，不建 FileRecord）
             detected = detect_type(first_chunk_data)
