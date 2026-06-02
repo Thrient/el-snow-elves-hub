@@ -337,7 +337,7 @@ async def create_task(
     fp = (await db.execute(
         select(Fingerprint).where(Fingerprint.id == zip_fingerprint_id)
     )).scalar_one_or_none()
-    if not fp or fp.detected_type != "application/zip":
+    if not fp or fp.detected_type != "zip":
         raise HTTPException(400, "ZIP 文件指纹无效或类型不匹配")
 
     file_record = await storage_service.create_record_from_fingerprint(
@@ -349,7 +349,7 @@ async def create_task(
         cfp = (await db.execute(
             select(Fingerprint).where(Fingerprint.id == cover_fingerprint_id)
         )).scalar_one_or_none()
-        if not cfp or cfp.detected_type not in ("image/png", "image/jpeg", "image/gif"):
+        if not cfp or cfp.detected_type not in ("png", "jpeg", "gif"):
             raise HTTPException(400, "封面仅支持 PNG / JPEG / GIF 图片")
         cover_record = await storage_service.create_record_from_fingerprint(
             db, cover_fingerprint_id, filename or "cover", user.id,
