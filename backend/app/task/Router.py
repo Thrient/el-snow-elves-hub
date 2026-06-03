@@ -324,8 +324,8 @@ async def create_task(
     title: str = Form(...), description: str = Form(""),
     category: str = Form("综合"), tags: str = Form(""),
     version: str = Form("1.0"), filename: str = Form(""),
-    zip_record_id: int = Form(..., alias="zip_record_id"),
-    cover_record_id: int | None = Form(None),
+    zip_fingerprint_id: int = Form(..., alias="zip_fingerprint_id"),
+    cover_fingerprint_id: int | None = Form(None, alias="cover_fingerprint_id"),
     user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
     _=Depends(require_perm_any("task:create")),
@@ -333,21 +333,27 @@ async def create_task(
     if "multipart/form-data" not in (request.headers.get("content-type") or ""):
         raise HTTPException(415, "请使用 multipart/form-data 上传")
 
-    file_record = (await db.execute(select(FileRecord).where(FileRecord.id == zip_record_id))).scalar_one_or_none()
-    if not file_record:
-        raise HTTPException(400, "文件记录不存在")
-    fp = file_record.fingerprint
-    if fp.detected_type and fp.detected_type != "zip":
-        raise HTTPException(400, "仅支持 ZIP 文件")
+    # Validate ZIP fingerprint
+    fp = (await db.execute(
+        select(Fingerprint).where(Fingerprint.id == zip_fingerprint_id)
+    )).scalar_one_or_none()
+    if not fp or fp.detected_type != "zip":
+        raise HTTPException(400, "ZIP 文件指纹无效或类型不匹配")
+
+    file_record = await storage_service.create_record_from_fingerprint(
+        db, zip_fingerprint_id, filename, user.id,
+    )
 
     cover_record = None
-    if cover_record_id:
-        cover_record = (await db.execute(select(FileRecord).where(FileRecord.id == cover_record_id))).scalar_one_or_none()
-        if not cover_record:
-            raise HTTPException(400, "封面记录不存在")
-        cfp = cover_record.fingerprint
-        if cfp.detected_type and cfp.detected_type not in ("png", "jpeg", "gif"):
+    if cover_fingerprint_id:
+        cfp = (await db.execute(
+            select(Fingerprint).where(Fingerprint.id == cover_fingerprint_id)
+        )).scalar_one_or_none()
+        if not cfp or cfp.detected_type not in ("png", "jpeg", "gif"):
             raise HTTPException(400, "封面仅支持 PNG / JPEG / GIF 图片")
+        cover_record = await storage_service.create_record_from_fingerprint(
+            db, cover_fingerprint_id, filename or "cover", user.id,
+        )
 
     task = Task(
         title=title, description=description, author_id=user.id,

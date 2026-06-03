@@ -1,7 +1,9 @@
-"""分块上传 — REST 端点"""
+"""无状态上传 — REST 端点"""
+import redis.asyncio as aioredis
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, UploadFile
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.Config import settings
 from app.infrastructure.Database import get_db
 from app.api.Deps import get_current_user, require_perm_any, require_verified
 from app.infrastructure.Response import ok
@@ -9,7 +11,7 @@ from app.infrastructure.Limiter import get_limiter
 from app.infrastructure.storage.ChunkedUpload import chunked_upload
 from app.identity.entity.User import User
 
-router = APIRouter(prefix="/uploads", tags=["断点续传"])
+router = APIRouter(prefix="/uploads", tags=["文件上传"])
 _limiter = get_limiter()
 
 from app.infrastructure.storage.Schema.InitRequest import InitRequest
@@ -25,14 +27,21 @@ async def init_upload(
     _=Depends(require_perm_any("file:upload:init")),
     _v=Depends(require_verified),
 ):
-    upload = await chunked_upload.init(db, body.filename, body.total_size, body.total_chunks, user.id)
-    return ok({"upload_id": upload.upload_id, "expires_at": upload.expires_at.isoformat()})
+    status = await chunked_upload.init(
+        db, sha256=body.sha256,
+        total_chunks=body.total_chunks, filename=body.filename,
+    )
+    return ok(status)
 
 
-@router.post("/{upload_id}/chunk")
+@router.post("/chunk")
+@_limiter.limit("120/minute")
 async def upload_chunk(
-    request: Request, upload_id: str,
+    request: Request,
+    sha256: str = Query(...),
     n: int = Query(...),
+    total: int = Query(...),
+    filename: str = Query(...),
     chunk: UploadFile = None,
     user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
@@ -41,20 +50,54 @@ async def upload_chunk(
 ):
     if not chunk:
         raise HTTPException(400, "缺少分片数据")
-    upload = await chunked_upload.chunk(db, upload_id, n, await chunk.read())
-    return ok({"chunk": n, "uploaded": len(upload.uploaded_chunks or []), "total": upload.total_chunks})
+    r = aioredis.from_url(settings.redis_url, decode_responses=False)
+    try:
+        result = await chunked_upload.chunk(
+            db, r, sha256=sha256, n=n,
+            total_chunks=total, filename=filename,
+            data=await chunk.read(),
+        )
+    finally:
+        await r.aclose()
+    return ok(result)
 
 
-@router.post("/{upload_id}/complete")
+@router.post("/complete")
 async def complete_upload(
-    request: Request, upload_id: str, body: CompleteRequest,
+    request: Request, body: CompleteRequest,
     user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
     _=Depends(require_perm_any("file:upload:complete")),
     _v=Depends(require_verified),
 ):
+    r = aioredis.from_url(settings.redis_url, decode_responses=False)
     try:
-        fp, record = await chunked_upload.complete(db, upload_id, body.sha256)
+        result = await chunked_upload.complete(
+            db, r, sha256=body.sha256, total_chunks=body.total_chunks,
+        )
     except ValueError as e:
         raise HTTPException(400, str(e))
-    return ok({"record_id": record.id})
+    finally:
+        await r.aclose()
+    return ok({"fingerprint_id": result["fingerprint_id"]})
+
+
+@router.post("/direct")
+@_limiter.limit("60/minute")
+async def direct_upload(
+    request: Request,
+    file: UploadFile,
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+    _=Depends(require_perm_any("file:upload:direct")),
+    _v=Depends(require_verified),
+):
+    r = aioredis.from_url(settings.redis_url, decode_responses=False)
+    try:
+        result = await chunked_upload.direct_upload(
+            db, r, filename=file.filename or "untitled",
+            data=await file.read(),
+        )
+    finally:
+        await r.aclose()
+    return ok({"fingerprint_id": result["fingerprint_id"]})

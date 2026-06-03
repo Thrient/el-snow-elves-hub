@@ -251,24 +251,19 @@ async def create_version(body: VersionCreate, user: User = Depends(require_perm(
     db.add(v)
     await db.flush()
 
-    sha256s = [f.sha256 for f in body.files]
-    fp_rows = (await db.execute(select(Fingerprint).where(Fingerprint.sha256.in_(sha256s)))).scalars().all()
-    fp_map = {fp.sha256: fp for fp in fp_rows}
-    fp_ids = [fp.id for fp in fp_rows]
-    rec_rows = (await db.execute(select(FileRecord).where(FileRecord.fingerprint_id.in_(fp_ids)))).scalars().all()
-    rec_map = {r.fingerprint_id: r for r in rec_rows}
     for f_entry in body.files:
-        fp = fp_map.get(f_entry.sha256)
+        fp = (await db.execute(
+            select(Fingerprint).where(Fingerprint.id == f_entry.fingerprint_id)
+        )).scalar_one_or_none()
         if not fp:
-            raise HTTPException(400, f"blob not found: {f_entry.sha256}")
-        record = rec_map.get(fp.id)
-        if not record:
-            record = await storage_service.create_record(
-                db, fp, filename=f_entry.path.split('/').pop() or "blob",
-                uploaded_by=user.id,
-            )
-            await db.flush()
-            rec_map[fp.id] = record
+            raise HTTPException(400, f"指纹不存在: {f_entry.fingerprint_id}")
+
+        record = await storage_service.create_record_from_fingerprint(
+            db, f_entry.fingerprint_id,
+            filename=f_entry.path.split('/').pop() or "blob",
+            uploaded_by=user.id,
+        )
+        await db.flush()
         db.add(VersionFile(
             version_id=v.id,
             relative_path=f_entry.path,

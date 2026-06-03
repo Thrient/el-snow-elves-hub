@@ -82,6 +82,12 @@ class MinioClient:
             MultipartUpload={"Parts": parts},
         )
 
+    def abort_multipart_upload(self, key: str, upload_id: str):
+        """取消分片上传 — 清理已创建但未完成的分片，避免对象存储泄露"""
+        self._client.abort_multipart_upload(
+            Bucket=self._bucket, Key=key, UploadId=upload_id,
+        )
+
     def delete_objects(self, keys: list[str]):
         """批量删除对象（自动分片每 1000 个一批）"""
         if not keys:

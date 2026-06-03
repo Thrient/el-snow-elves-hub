@@ -108,7 +108,7 @@ async def seed():
                      "forum:update", "forum:delete",
                      "task:create", "task:like", "task:comment", "task:delete",
                      "comment:delete",
-                     "file:check", "file:upload:init", "file:upload:chunk", "file:upload:complete",
+                     "file:check", "file:upload:init", "file:upload:chunk", "file:upload:complete", "file:upload:direct",
                      "notification:list", "notification:count", "notification:read", "notification:read-all",
                      "user:view", "user:update", "user:email", "user:downloads", "user:likes", "user:avatar"]:
             p = (await db.execute(select(Permission).where(Permission.code == code))).scalar_one()

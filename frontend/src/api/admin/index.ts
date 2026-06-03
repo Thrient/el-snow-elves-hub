@@ -39,13 +39,13 @@ export const adminApi = {
     changelog?: string;
     is_latest?: boolean;
     is_mandatory?: boolean;
-    files: { path: string; sha256: string }[];
+    files: { path: string; fingerprint_id: number }[];
   }) => api.post("/api/v1/admin/versions", data),
   deleteVersion: (id: number) => api.delete(`/api/v1/admin/versions/${id}`),
 
   // Blob
   checkBlobs: (sha256_list: string[]) =>
-    api.post<{ code: number; data: { existing: string[]; missing: string[] } }>("/api/v1/files/check", { sha256: sha256_list }).then((r) => r.data),
+    api.post<{ code: number; data: { existing: { sha256: string; fingerprint_id: number }[]; missing: string[] } }>("/api/v1/files/check", { sha256: sha256_list }).then((r) => r.data),
 
   uploadBlob: (file: File, onProgress?: (pct: number) => void) => uploadFile(file, onProgress),
 

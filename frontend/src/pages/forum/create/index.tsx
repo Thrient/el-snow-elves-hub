@@ -35,7 +35,7 @@ const ForumCreatePage: FC = () => {
     setSubmitting(true);
     try {
       const imageIds = images.filter((img) => img.fileId !== null).map((img) => img.fileId as number);
-      await forumApi.createThread({ title: title.trim(), content: content.trim(), board_id: boardId, image_ids: imageIds });
+      await forumApi.createThread({ title: title.trim(), content: content.trim(), board_id: boardId, image_fingerprint_ids: imageIds });
       message.success("发布成功");
       navigate(`/forum/${boardId}`, { replace: true });
     } catch { /* ErrorToast */ }

@@ -24,7 +24,7 @@ const VersionsPage: FC = () => {
   const [uploadStage, setUploadStage] = useState<UploadStage>("idle");
   const [uploadBytes, setUploadBytes] = useState({ done: 0, total: 0 });
   const [uploadSpeed, setUploadSpeed] = useState(0);
-  const [fileManifest, setFileManifest] = useState<Record<string, { sha256: string; size: number; file: File }>>({});
+  const [fileManifest, setFileManifest] = useState<Record<string, { sha256: string; fingerprint_id?: number; size: number; file: File }>>({});
   const canManage = useAuthStore((s) => s.hasPerm)("version:create");
 
   const load = () => adminApi.listVersions().then(setVersions);
@@ -42,7 +42,7 @@ const VersionsPage: FC = () => {
     const rootName = (fileList[0].webkitRelativePath || "").split("/")[0] || "unknown";
     const totalSize = fileList.reduce((s, f) => s + f.size, 0);
     setFolderName(rootName); setUploadStage("hashing"); setUploadBytes({ done: 0, total: totalSize });
-    const manifest: Record<string, { sha256: string; size: number; file: File }> = {};
+    const manifest: Record<string, { sha256: string; fingerprint_id?: number; size: number; file: File }> = {};
     let hashedBytes = 0;
     for (let i = 0; i < fileList.length; i++) {
       const file = fileList[i];
@@ -63,31 +63,41 @@ const VersionsPage: FC = () => {
       const entries = Object.entries(fileManifest);
       const shaList = entries.map(([, v]) => v.sha256);
       setUploadStage("checking"); setUploadBytes({ done: 0, total: 0 });
-      const { missing } = await adminApi.checkBlobs(shaList);
+      const { existing, missing } = await adminApi.checkBlobs(shaList);
+      // Capture fingerprint_ids from pre-check
+      const existingMap = new Map(existing.map((e) => [e.sha256, e.fingerprint_id]));
+      const updatedManifest = { ...fileManifest };
+      for (const [path, info] of Object.entries(updatedManifest)) {
+        const fpId = existingMap.get(info.sha256);
+        if (fpId != null) updatedManifest[path] = { ...info, fingerprint_id: fpId };
+      }
+      setFileManifest(updatedManifest);
       if (missing.length > 0) {
         const missingSet = new Set(missing);
         const missingFiles = entries.filter(([, { sha256 }]) => missingSet.has(sha256));
         const totalBytes = missingFiles.reduce((s, [, { size }]) => s + size, 0);
         setUploadStage("uploading"); setUploadBytes({ done: 0, total: totalBytes });
         let uploadedBytes = 0;
-        for (const [, { size, file }] of missingFiles) {
+        for (const [path, { size, file }] of missingFiles) {
           const t0 = performance.now();
-          await adminApi.uploadBlob(file, (pct) => {
+          const result = await adminApi.uploadBlob(file, (pct) => {
             const currentFileBytes = Math.round(size * pct / 100);
             setUploadBytes({ done: uploadedBytes + currentFileBytes, total: totalBytes });
             const elapsed = performance.now() - t0;
             if (elapsed > 0) setUploadSpeed(currentFileBytes / elapsed * 1000);
           });
+          updatedManifest[path] = { ...updatedManifest[path], fingerprint_id: result.fingerprint_id };
           uploadedBytes += size;
           setUploadBytes({ done: uploadedBytes, total: totalBytes });
         }
         setUploadSpeed(0);
+        setFileManifest(updatedManifest);
       }
       setUploadStage("creating");
       await adminApi.createVersion({
         version: form.version, platform: form.platform, changelog: form.changelog || undefined,
         is_latest: form.is_latest, is_mandatory: form.is_mandatory,
-        files: entries.map(([path, { sha256 }]) => ({ path, sha256 })),
+        files: Object.entries(updatedManifest).map(([path, { fingerprint_id }]) => ({ path, fingerprint_id: fingerprint_id! })),
       });
       message.success("版本已创建"); setOpen(false);
       setForm({ version: "", platform: "Windows x64", changelog: "", is_latest: false, is_mandatory: false });

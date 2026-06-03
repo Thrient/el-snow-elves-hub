@@ -1,160 +1,212 @@
-"""分块上传服务 — init / chunk / complete / cleanup"""
+"""无状态分片上传 — SHA256 天然标识 + Redis 分布式锁"""
+import asyncio
 import hashlib
 import logging
-from datetime import datetime, timezone
-
-from sqlalchemy import select, and_
+from sqlalchemy import select, func, delete
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.infrastructure.storage.entity.Upload import Upload
-from app.infrastructure.storage.MinioClient import client as minio
-from app.infrastructure.storage.StorageService import storage_service
+from app.infrastructure.storage.entity.UploadChunk import UploadChunk
+from app.infrastructure.storage.Lock import lock_chunk, release_chunk, lock_merge, release_merge
+from app.infrastructure.storage.entity.Fingerprint import Fingerprint
+from app.infrastructure.storage.FileValidator import detect_type
 
 _log = logging.getLogger("Elves.ChunkedUpload")
 
 
+def _minio():
+    """Lazy import MinioClient singleton — avoids import-time connection errors."""
+    from app.infrastructure.storage.MinioClient import client
+    return client
+
+
 class ChunkedUpload:
-    """管理分块上传的完整生命周期"""
 
-    async def init(self, db: AsyncSession, filename: str, total_size: int, total_chunks: int, uploaded_by: int | None = None) -> Upload:
-        upload = Upload(
-            filename=filename, total_size=total_size, total_chunks=total_chunks,
-            uploaded_by=uploaded_by,
+    # ── init: 纯查询，不创建任何记录 ──
+
+    async def init(self, db: AsyncSession, *, sha256: str,
+                   total_chunks: int, filename: str) -> dict:
+        result = await db.execute(
+            select(UploadChunk.chunk_index)
+            .where(UploadChunk.sha256 == sha256)
+            .order_by(UploadChunk.chunk_index)
         )
-        db.add(upload)
-        await db.commit()
-        return upload
+        chunks = sorted(row[0] for row in result.all())
+        return {
+            "exists": len(chunks) > 0,
+            "chunks": chunks,
+            "total_chunks": total_chunks,
+        }
 
-    async def chunk(self, db: AsyncSession, upload_id: str, n: int, data: bytes) -> Upload:
-        upload = (await db.execute(
-            select(Upload).where(Upload.upload_id == upload_id)
-        )).scalar_one_or_none()
-        if not upload:
-            raise ValueError("上传会话不存在或已过期")
+    # ── chunk: Redis 锁 → 双重检查 → MinIO → DB ──
 
-        minio.upload(f"chunks/{upload_id}/{n}", data, "application/octet-stream")
-
-        # 记录 chunk SHA256
-        chunk_hash = hashlib.sha256(data).hexdigest()
-        hashes = dict(upload.chunk_hashes or {})
-        hashes[str(n)] = chunk_hash
-        upload.chunk_hashes = hashes
-
-        chunks = list(upload.uploaded_chunks or [])
-        if n not in chunks:
-            chunks.append(n)
-        upload.uploaded_chunks = sorted(chunks)
-        await db.commit()
-        return upload
-
-    async def complete(self, db: AsyncSession, upload_id: str, sha256: str):
-        upload = (await db.execute(
-            select(Upload).where(Upload.upload_id == upload_id)
-        )).scalar_one_or_none()
-        if not upload:
-            raise ValueError("上传会话不存在或已过期")
-
-        chunks = sorted(upload.uploaded_chunks or [])
-        if len(chunks) != upload.total_chunks:
-            raise ValueError(f"分片未完整: {len(chunks)}/{upload.total_chunks}")
-
-        from app.infrastructure.storage.entity.Fingerprint import Fingerprint
-        from app.infrastructure.storage.FileValidator import detect_type
-
-        # 去重：sha256 已存在则跳过合并
-        existing = (await db.execute(
-            select(Fingerprint).where(Fingerprint.sha256 == sha256)
-        )).scalar_one_or_none()
-
-        if existing:
-            fp = existing
-        else:
-            # 服务端合并（UploadPartCopy，数据不经过后端）
-            mp_id = minio.create_multipart_upload(sha256)
-            parts = []
-            for i, n in enumerate(chunks, start=1):
-                result = minio.upload_part_copy(
-                    sha256, mp_id, i, f"chunks/{upload_id}/{n}"
+    async def chunk(self, db: AsyncSession, r, *, sha256: str, n: int,
+                    total_chunks: int, filename: str, data: bytes) -> dict:
+        if not await lock_chunk(r, sha256, n):
+            await asyncio.sleep(0.1)
+            existing = await db.execute(
+                select(UploadChunk).where(
+                    UploadChunk.sha256 == sha256, UploadChunk.chunk_index == n,
                 )
-                parts.append(result)
-            minio.complete_multipart_upload(sha256, mp_id, parts)
+            )
+            if existing.scalar_one_or_none():
+                return {"chunk": n, "status": "exists"}
+            await asyncio.sleep(0.5)
+            if not await lock_chunk(r, sha256, n):
+                return {"chunk": n, "status": "conflict"}
 
-            # 从第一个分片检测文件类型（只读前几 KB）
-            first_chunk_data, _ = minio.download(f"chunks/{upload_id}/{chunks[0]}")
+        try:
+            existing = await db.execute(
+                select(UploadChunk).where(
+                    UploadChunk.sha256 == sha256, UploadChunk.chunk_index == n,
+                )
+            )
+            if existing.scalar_one_or_none():
+                return {"chunk": n, "status": "exists"}
+
+            _minio().upload(f"chunks/{sha256}/{n}", data, "application/octet-stream")
+            db.add(UploadChunk(
+                sha256=sha256, chunk_index=n,
+                total_chunks=total_chunks, filename=filename,
+            ))
+            await db.commit()
+            return {"chunk": n, "status": "ok"}
+        finally:
+            await release_chunk(r, sha256, n)
+
+    # ── complete: 流式算哈希 → 快路径 → Redis 合并锁 → 组装 → 只建 Fingerprint ──
+
+    async def complete(self, db: AsyncSession, r, *, sha256: str,
+                       total_chunks: int) -> dict:
+        # 1. 完整性检查
+        count_result = await db.execute(
+            select(func.count()).where(UploadChunk.sha256 == sha256)
+        )
+        if count_result.scalar() != total_chunks:
+            raise ValueError(f"分片未完整")
+
+        # 2. 流式读取所有分片 → 哈希 + 大小（一趟循环）
+        h = hashlib.sha256()
+        first_chunk_data = None
+        total_size = 0
+        minio = _minio()
+        for n in range(total_chunks):
+            data, _ = minio.download(f"chunks/{sha256}/{n}")
+            h.update(data)
+            total_size += len(data)
+            if n == 0:
+                first_chunk_data = data
+        full_hash = h.hexdigest()
+
+        # 3. 快路径：指纹已存在
+        fp_result = await db.execute(
+            select(Fingerprint).where(Fingerprint.sha256 == full_hash)
+        )
+        fp = fp_result.scalar_one_or_none()
+        if fp:
+            return {"fingerprint_id": fp.id}
+
+        # 4. 抢合并锁
+        if not await lock_merge(r, sha256):
+            for _ in range(30):
+                await asyncio.sleep(1)
+                fp = (await db.execute(
+                    select(Fingerprint).where(Fingerprint.sha256 == full_hash)
+                )).scalar_one_or_none()
+                if fp:
+                    return {"fingerprint_id": fp.id}
+            if not await lock_merge(r, sha256):
+                raise ValueError("合并锁超时")
+
+        try:
+            # 5. 双重检查
+            fp = (await db.execute(
+                select(Fingerprint).where(Fingerprint.sha256 == full_hash)
+            )).scalar_one_or_none()
+            if fp:
+                return {"fingerprint_id": fp.id}
+
+            # 6. MinIO multipart copy 组装（异常时 abort 防止对象存储泄露）
+            mp_id = None
+            try:
+                mp_id = minio.create_multipart_upload(full_hash)
+                parts = []
+                for i in range(total_chunks):
+                    result = minio.upload_part_copy(
+                        full_hash, mp_id, i + 1, f"chunks/{sha256}/{i}"
+                    )
+                    parts.append(result)
+                minio.complete_multipart_upload(full_hash, mp_id, parts)
+            except Exception:
+                if mp_id:
+                    try:
+                        minio.abort_multipart_upload(full_hash, mp_id)
+                    except Exception:
+                        _log.warning(f"abort multipart upload 失败: {full_hash}")
+                raise
+
+            # 7. 创建 Fingerprint（只建指纹，不建 FileRecord）
             detected = detect_type(first_chunk_data)
-
-            fp = Fingerprint(sha256=sha256, size=upload.total_size, detected_type=detected)
+            fp = Fingerprint(
+                sha256=full_hash, size=total_size, detected_type=detected,
+            )
             db.add(fp)
             await db.flush()
 
-        record = await storage_service.create_record(
-            db, fp,
-            filename=upload.filename,
-            uploaded_by=upload.uploaded_by,
+            # 8. 清理
+            chunk_keys = [f"chunks/{sha256}/{n}" for n in range(total_chunks)]
+            try:
+                minio.delete_objects(chunk_keys)
+            except Exception:
+                _log.warning(f"分片清理失败: chunks/{sha256}/*")
+            await db.execute(delete(UploadChunk).where(UploadChunk.sha256 == sha256))
+            await db.commit()
+
+            return {"fingerprint_id": fp.id}
+        finally:
+            await release_merge(r, sha256)
+
+    # ── direct: 小文件直传（只建指纹，不建 FileRecord） ──
+
+    async def direct_upload(self, db: AsyncSession, r, *,
+                            filename: str, data: bytes) -> dict:
+        sha256 = hashlib.sha256(data).hexdigest()
+
+        # 快路径
+        existing = await db.execute(
+            select(Fingerprint).where(Fingerprint.sha256 == sha256)
         )
+        fp = existing.scalar_one_or_none()
+        if fp:
+            return {"fingerprint_id": fp.id}
 
-        # 批量删除分片（容错：删除失败不阻塞完成流程）
-        chunk_keys = [f"chunks/{upload_id}/{n}" for n in chunks]
-        try:
-            minio.delete_objects(chunk_keys)
-        except Exception:
-            _log.warning(f"分片清理失败，残留 {len(chunk_keys)} 个对象于 chunks/{upload_id}/")
-
-        await db.delete(upload)
-        await db.commit()
-
-        # 异步验证 SHA256（后台任务，不阻塞返回）
-        import asyncio
-        asyncio.create_task(self._verify_sha256(sha256))
-
-        return fp, record
-
-    async def _verify_sha256(self, sha256: str):
-        """后台异步：流式下载文件验证 SHA256，避免大文件 OOM"""
-        import hashlib as hl
-        from app.infrastructure.Database import async_session
-        from app.infrastructure.storage.entity.Fingerprint import Fingerprint
-        try:
-            stream, _, _ = minio.stream(sha256)
-            h = hl.sha256()
-            for chunk in stream:
-                h.update(chunk)
-            actual = h.hexdigest()
-            async with async_session() as db:
+        # 抢锁
+        if not await lock_merge(r, sha256):
+            for _ in range(10):
+                await asyncio.sleep(0.5)
                 fp = (await db.execute(
                     select(Fingerprint).where(Fingerprint.sha256 == sha256)
                 )).scalar_one_or_none()
                 if fp:
-                    fp.verified = (actual == sha256)
-                    await db.commit()
-                    if fp.verified:
-                        _log.info(f"SHA256 验证通过: {sha256[:16]}...")
-                    else:
-                        _log.error(f"SHA256 验证失败: expected={sha256[:16]}..., actual={actual[:16]}...")
-        except Exception as e:
-            _log.error(f"SHA256 异步验证异常: {e}")
+                    return {"fingerprint_id": fp.id}
+            if not await lock_merge(r, sha256):
+                raise ValueError("直传锁超时")
 
-    async def cleanup_expired(self, db: AsyncSession) -> int:
-        """清理过期的上传会话及分片，返回清理数量"""
-        result = await db.execute(
-            select(Upload).where(
-                and_(
-                    Upload.status.in_(["uploading", "done"]),
-                    Upload.expires_at < datetime.now(timezone.utc),
-                )
-            )
-        )
-        expired = result.scalars().all()
-        for u in expired:
-            for n in range(u.total_chunks):
-                try:
-                    minio.delete(f"chunks/{u.upload_id}/{n}")
-                except Exception:
-                    pass
-            await db.delete(u)
-        if expired:
+        try:
+            fp = (await db.execute(
+                select(Fingerprint).where(Fingerprint.sha256 == sha256)
+            )).scalar_one_or_none()
+            if fp:
+                return {"fingerprint_id": fp.id}
+
+            minio = _minio()
+            detected = detect_type(data)
+            minio.upload(sha256, data, "application/octet-stream")
+            fp = Fingerprint(sha256=sha256, size=len(data), detected_type=detected)
+            db.add(fp)
             await db.commit()
-        return len(expired)
+            return {"fingerprint_id": fp.id}
+        finally:
+            await release_merge(r, sha256)
 
 
 chunked_upload = ChunkedUpload()

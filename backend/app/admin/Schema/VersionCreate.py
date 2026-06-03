@@ -4,7 +4,7 @@ from pydantic import BaseModel
 
 class FileEntry(BaseModel):
     path: str
-    sha256: str
+    fingerprint_id: int
 
 
 class VersionCreate(BaseModel):
