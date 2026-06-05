@@ -1,7 +1,7 @@
 import { api } from "@/api/axios";
 
 const CHUNK_SIZE = 5 * 1024 * 1024;       // 5MB
-const DIRECT_THRESHOLD = 5 * 1024 * 1024; // ≤5MB direct upload
+const DIRECT_THRESHOLD = 10 * 1024 * 1024; // ≤10MB direct upload
 
 // ── Check result ──
 interface BatchCheckResult {
