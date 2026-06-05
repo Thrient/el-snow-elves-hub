@@ -21,25 +21,15 @@ AI_EMAIL = "ai-reviewer@elarion.cn"
 OLLAMA_URL = "http://ollama:11434/api/generate"
 MODEL = "minicpm-v:8b"
 
-REVIEW_PROMPT = """你是内容安全审核员。返回 JSON：{"action":"pass|pending|reject","reason":"..."}
+REVIEW_PROMPT = """检查内容是否包含以下违规：
+- 人身攻击（包括拼音缩写如 sb/cnm/nmsl）
+- 色情/低俗内容
+- 政治敏感
 
-action 含义：
-- pass：内容正常，未发现违规 → 直接放行
-- pending：有可疑迹象但拿不准 → 交人工判断
-- reject：明确、严重违规，你有十足把握 → 直接拒绝
-
-关键规则：
-- 没发现问题 → action 必须是 pass，不要设为 pending 或 reject
-- 只有看到具体违规内容时才用 pending 或 reject
-- 不确定 = 没发现 = pass
-- 宁可 pass 漏过，不要 pending 误拦
-
-判断方向：
-1. 明显色情（生殖器暴露）→ reject；有点擦边但看不清 → pass
-2. 辱骂、威胁特定用户 → reject；一般争论吐槽 → pass
-3. 极端政治 → reject；普通讨论 → pass
-
-reason 简要说明判断依据。
+返回 JSON：{"action":"pass|pending|reject","reason":"原因"}
+- 明确违规 → action=reject
+- 不确定但可疑 → action=pending
+- 正常内容 → action=pass
 
 待审：\n"""
 
