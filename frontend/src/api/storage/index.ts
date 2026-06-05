@@ -130,32 +130,28 @@ export async function upload(
   // ── Phase 2: Batch pre-check ──
   onProgress?.({ phase: "checking", current: 0, total, filePct: 0 });
   const sha256List = filesWithHash.map((f) => f.sha256);
-  const { existing, missing } = await uploadApi.check(sha256List);
+  const { existing } = await uploadApi.check(sha256List);
   const existingMap = new Map(existing.map((e) => [e.sha256, e.fingerprint_id]));
-  const missingSet = new Set(missing);
 
-  // ── Phase 3: Upload missing files ──
+  // ── Phase 3: Upload each file (existing → skip with instant 100%) ──
   const results: UploadResult[] = [];
-  let uploadIndex = 0;
-  const missingFiles = filesWithHash.filter((f) => missingSet.has(f.sha256));
-  const totalUpload = missingFiles.length;
+  const totalFiles = filesWithHash.length;
 
-  onProgress?.({ phase: "uploading", current: 0, total: totalUpload, filePct: 0 });
+  onProgress?.({ phase: "uploading", current: 0, total: totalFiles, filePct: 0 });
 
-  for (const { file, sha256 } of missingFiles) {
-    const uploadResult = await uploadSingle(file, sha256, (pct) => {
-      onProgress?.({ phase: "uploading", current: uploadIndex, total: totalUpload, filePct: pct });
-    });
-    results.push({ file, sha256, fingerprint_id: uploadResult.fingerprint_id });
-    uploadIndex++;
-  }
-
-  // ── Existing files → return fingerprint_ids ──
-  for (const { file, sha256 } of filesWithHash) {
+  for (let i = 0; i < filesWithHash.length; i++) {
+    const { file, sha256 } = filesWithHash[i];
     const fpId = existingMap.get(sha256);
     if (fpId != null) {
       results.push({ file, sha256, fingerprint_id: fpId });
+      // Already exists — report as instantly done
+      onProgress?.({ phase: "uploading", current: i, total: totalFiles, filePct: 100 });
+      continue;
     }
+    const uploadResult = await uploadSingle(file, sha256, (pct) => {
+      onProgress?.({ phase: "uploading", current: i, total: totalFiles, filePct: pct });
+    });
+    results.push({ file, sha256, fingerprint_id: uploadResult.fingerprint_id });
   }
 
   const resultMap = new Map(results.map((r) => [r.file, r]));
