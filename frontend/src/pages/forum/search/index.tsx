@@ -56,7 +56,7 @@ const ForumSearchPage: FC = () => {
   };
 
   return (
-    <div className="max-w-[55rem] mx-auto pt-8">
+    <div className="w-full max-w-[1600px] mx-auto pt-8">
       {/* Header */}
       <div className="mb-5">
         <Button type="text" icon={<ArrowLeftOutlined />}
