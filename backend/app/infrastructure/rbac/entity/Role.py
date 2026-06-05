@@ -4,6 +4,7 @@ from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.infrastructure.Database import Base
 from app.infrastructure.rbac.entity.Permission import Permission
+from app.infrastructure.rbac.entity.RolePermission import RolePermission  # noqa: F401
 
 
 class Role(Base):
