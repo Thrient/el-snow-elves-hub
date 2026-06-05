@@ -2,7 +2,7 @@
 import asyncio
 
 from app.infrastructure.Database import engine, async_session, Base
-from sqlalchemy import select, func
+from sqlalchemy import select, func, text
 from app.infrastructure.rbac.entity.Role import Role
 from app.infrastructure.rbac.entity.Permission import Permission
 from app.infrastructure.rbac.entity.RolePermission import RolePermission
@@ -241,21 +241,72 @@ async def seed():
         else:
             print("路由已存在，跳过")
 
-    # 兼容迁移：detected_type 列
-    try:
-        for sql in [
-            "ALTER TABLE fingerprints ADD COLUMN detected_type VARCHAR(16) NULL",
-            "ALTER TABLE forum_posts ADD COLUMN status VARCHAR(16) DEFAULT 'approved'",
-            "ALTER TABLE forum_posts ADD COLUMN reviewed TINYINT(1) DEFAULT 0",
-            "ALTER TABLE comments ADD COLUMN status VARCHAR(16) DEFAULT 'approved'",
-            "ALTER TABLE comments ADD COLUMN reviewed TINYINT(1) DEFAULT 0",
-            "ALTER TABLE tasks ADD COLUMN reviewed TINYINT(1) DEFAULT 0",
-        ]:
-            try: await db.execute(text(sql)); await db.commit()
-            except: await db.rollback()
-        print("迁移: 兼容列已检查")
-    except Exception:
-        pass
+        # ── 兼容迁移: 旧列 ──
+        from sqlalchemy import text as sql_text
+        try:
+            for sql in [
+                "ALTER TABLE fingerprints ADD COLUMN detected_type VARCHAR(16) NULL",
+                "ALTER TABLE forum_posts ADD COLUMN status VARCHAR(16) DEFAULT 'approved'",
+                "ALTER TABLE forum_posts ADD COLUMN reviewed TINYINT(1) DEFAULT 0",
+                "ALTER TABLE comments ADD COLUMN status VARCHAR(16) DEFAULT 'approved'",
+                "ALTER TABLE comments ADD COLUMN reviewed TINYINT(1) DEFAULT 0",
+                "ALTER TABLE tasks ADD COLUMN reviewed TINYINT(1) DEFAULT 0",
+            ]:
+                try:
+                    await db.execute(sql_text(sql))
+                    await db.commit()
+                except Exception:
+                    await db.rollback()
+            print("迁移: 兼容列已检查")
+        except Exception:
+            pass
+
+        # ── 审核系统重构迁移 ──
+        try:
+            from sqlalchemy import inspect as sql_inspect
+            inspector = sql_inspect(db.get_bind())
+            existing_tables = inspector.get_table_names()
+
+            if "review_records" not in existing_tables:
+                await db.execute(sql_text("""
+                    CREATE TABLE review_records (
+                        id INT AUTO_INCREMENT PRIMARY KEY,
+                        content_type VARCHAR(16) NOT NULL,
+                        content_id INT NOT NULL,
+                        reviewer_id INT NULL,
+                        status VARCHAR(16) DEFAULT 'pending',
+                        reason TEXT NULL,
+                        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+                        updated_at DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+                        INDEX idx_rt_s (content_type, status),
+                        INDEX idx_rc (content_type, content_id),
+                        FOREIGN KEY (reviewer_id) REFERENCES users(id)
+                    )
+                """))
+                await db.commit()
+                print("迁移: review_records 表已创建")
+            else:
+                print("迁移: review_records 表已存在")
+
+            for table in ["forum_posts", "tasks", "comments"]:
+                result = await db.execute(
+                    sql_text(f"UPDATE {table} SET status = 'published' WHERE status = 'approved'")
+                )
+                if result.rowcount:
+                    print(f"迁移: {table} 状态更新 {result.rowcount} 行")
+
+            for table in ["forum_posts", "tasks", "comments"]:
+                cols = [c["name"] for c in inspector.get_columns(table)]
+                if "reviewed" in cols:
+                    await db.execute(sql_text(f"ALTER TABLE {table} DROP COLUMN reviewed"))
+                    await db.commit()
+                    print(f"迁移: {table}.reviewed 列已删除")
+
+            await db.commit()
+            print("审核系统迁移完成")
+        except Exception as e:
+            await db.rollback()
+            print(f"审核系统迁移: {e}")
 
 
 if __name__ == "__main__":
