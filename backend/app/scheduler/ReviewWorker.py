@@ -15,19 +15,26 @@ from app.task.entity.Task import Task as TaskModel
 from app.task.entity.Comment import Comment
 from app.identity.entity.User import User
 from app.review.entity.ReviewRecord import ReviewRecord
+from app.notification.Router import create_notification
 
 AI_EMAIL = "ai-reviewer@elarion.cn"
 OLLAMA_URL = "http://ollama:11434/api/generate"
 MODEL = "minicpm-v:8b"
 
-REVIEW_PROMPT = """同时审查文字和图片。必须给出明确判断，不得返回不确定。
+REVIEW_PROMPT = """你是内容安全审核员。返回 JSON：{"action":"pass|pending|reject","reason":"..."}
 
-拒绝条件（pass=false）：
-1.色情/裸露：直接暴露生殖器、女性胸部、性行为、性暗示姿势、情趣内衣
-2.人身攻击：辱骂、诅咒、威胁（含拼音缩写sb/cnm/nmsl等）
-3.政治敏感：攻击国家/政府/领导人、分裂言论、敏感历史事件
+action 含义：
+- pass：内容正常，直接放行
+- pending：无法确定是否违规，交由人工判断
+- reject：明确严重违规，可直接拒绝
 
-reason字段要求：若拒绝，必须引用具体违规内容，例如"图片暴露女性胸部"、"文字含cnm辱骂"、"图片为生殖器特写"。若通过，写"内容正常"。必须JSON：{"pass":true|false,"reason":"具体引用"}
+判断标准：
+1. 明显色情（生殖器暴露）→ reject；擦边或无法确定 → pending
+2. 直接人身攻击（对特定用户辱骂、威胁）→ reject；情绪化争论 → pass
+3. 明确政治极端内容 → reject；普通讨论 → pass
+
+原则：不确定时不强判。宁可 pending 等人工，不要乱 pass 或乱 reject。
+reason 简要说明判断依据。
 
 待审：\n"""
 
@@ -48,7 +55,7 @@ async def _get_ai_user_id() -> int:
 
 
 async def ai_review_text(text: str, image_urls: list[str] | None = None) -> dict:
-    """调 Ollama 审查，返回 {"pass": bool|None, "reason": str}"""
+    """调 Ollama 审查，返回 {"action": "pass"|"pending"|"reject"|None, "reason": str}"""
     prompt = REVIEW_PROMPT + text
 
     image_b64s: list[str] = []
@@ -77,11 +84,13 @@ async def ai_review_text(text: str, image_urls: list[str] | None = None) -> dict
                 data = resp.json()
                 raw = data["response"]
                 result = json.loads(raw)
-                passed = result.get("pass", result.get("action") == "pass")
+                action = result.get("action", "pending")
                 reason = result.get("reason", "")
+                if action not in ("pass", "pending", "reject"):
+                    action = "pending"
                 if not reason:
-                    reason = "内容违规" if not passed else "内容正常"
-                return {"pass": passed, "reason": reason}
+                    reason = "内容正常" if action == "pass" else "无法确定" if action == "pending" else "违规内容"
+                return {"action": action, "reason": reason}
         except (httpx.TimeoutException, httpx.ConnectError, httpx.RemoteProtocolError):
             last_error = "network error"
         except Exception as e:
@@ -90,7 +99,7 @@ async def ai_review_text(text: str, image_urls: list[str] | None = None) -> dict
             await asyncio.sleep(2)
     # 3 次重试都失败
     print(f"AI review failed after 3 retries: {last_error}")
-    return {"pass": None, "reason": last_error}
+    return {"action": None, "reason": last_error}
 
 
 async def _resolve_images(image_ids: list | None) -> list[str]:
@@ -103,8 +112,35 @@ async def _resolve_images(image_ids: list | None) -> list[str]:
         return [storage_service.url(r.fingerprint) for r in recs]
 
 
+async def _notify_rejected(
+    db, content_type: str, content_id: int, author_id: int | None, title: str, reason: str,
+):
+    """通知作者内容被拒绝"""
+    if not author_id:
+        return
+    type_label = {"post": "帖子", "reply": "回复", "task": "任务", "comment": "评论"}
+    label = type_label.get(content_type, "内容")
+    link = ""
+    if content_type == "post":
+        link = f"/forum/post/{content_id}"
+    elif content_type == "reply":
+        p = (await db.execute(select(ForumPost).where(ForumPost.id == content_id))).scalar_one_or_none()
+        link = f"/forum/post/{p.thread_id}" if (p and p.thread_id) else ""
+    elif content_type == "task":
+        link = f"/market/{content_id}"
+    elif content_type == "comment":
+        c = (await db.execute(select(Comment).where(Comment.id == content_id))).scalar_one_or_none()
+        link = f"/market/{c.task_id}" if (c and c.task_id) else ""
+    await create_notification(
+        db, receiver_id=author_id, sender_id=None,
+        type_="review_rejected",
+        content=f"你的{label}「{title[:30]}」未通过审核：{reason}",
+        link=link,
+    )
+
+
 async def _handle_message(data: dict):
-    """处理单条审核消息 — 直接 INSERT ReviewRecord + UPDATE content.status"""
+    """处理单条审核消息 — 三态：pass→通过 / pending→人工 / reject→拒绝+通知"""
     type_ = data["type"]
     item_id = data["id"]
     ai_user_id = await _get_ai_user_id()
@@ -118,21 +154,36 @@ async def _handle_message(data: dict):
                 return
             text = (p.title or "") + "\n" + (p.content or "")
             image_ids = p.image_ids
+            author_id = p.author_id
+            title = p.title or (p.content or "")[:30]
         images = await _resolve_images(image_ids)
         result = await ai_review_text(text, images)
-        if result["pass"] is None:
+        if result["action"] is None:
             raise RuntimeError(f"AI unavailable for {type_} #{item_id} after retries")
-        passed = result["pass"]
-        print(f"AI {'passed' if passed else 'rejected'} {type_} #{item_id}: {result['reason']}")
+        action = result["action"]
+        print(f"AI [{action}] {type_} #{item_id}: {result['reason']}")
 
         async with async_session() as db:
-            if passed:
+            if action == "pass":
                 db.add(ReviewRecord(
                     content_type=type_, content_id=item_id,
                     reviewer_id=ai_user_id, status="approved",
                     reason=result["reason"],
                 ))
-            else:
+            elif action == "reject":
+                db.add(ReviewRecord(
+                    content_type=type_, content_id=item_id,
+                    reviewer_id=ai_user_id, status="rejected",
+                    reason=result["reason"],
+                ))
+                p = (await db.execute(
+                    select(ForumPost).where(ForumPost.id == item_id)
+                )).scalar_one_or_none()
+                if p:
+                    p.status = "rejected"
+                await db.flush()
+                await _notify_rejected(db, type_, item_id, author_id, title, result["reason"])
+            else:  # pending
                 db.add(ReviewRecord(
                     content_type=type_, content_id=item_id,
                     reviewer_id=None, status="pending",
@@ -154,21 +205,36 @@ async def _handle_message(data: dict):
                 return
             text = f"{t.title}\n{t.description or ''}"
             cover_id = t.cover_record_id
+            author_id = t.author_id
+            title = t.title
         images = await _resolve_images([cover_id] if cover_id else [])
         result = await ai_review_text(text, images)
-        if result["pass"] is None:
+        if result["action"] is None:
             raise RuntimeError(f"AI unavailable for {type_} #{item_id} after retries")
-        passed = result["pass"]
-        print(f"AI {'passed' if passed else 'rejected'} task #{item_id}: {result['reason']}")
+        action = result["action"]
+        print(f"AI [{action}] task #{item_id}: {result['reason']}")
 
         async with async_session() as db:
-            if passed:
+            if action == "pass":
                 db.add(ReviewRecord(
                     content_type="task", content_id=item_id,
                     reviewer_id=ai_user_id, status="approved",
                     reason=result["reason"],
                 ))
-            else:
+            elif action == "reject":
+                db.add(ReviewRecord(
+                    content_type="task", content_id=item_id,
+                    reviewer_id=ai_user_id, status="rejected",
+                    reason=result["reason"],
+                ))
+                t = (await db.execute(
+                    select(TaskModel).where(TaskModel.id == item_id)
+                )).scalar_one_or_none()
+                if t:
+                    t.status = "rejected"
+                await db.flush()
+                await _notify_rejected(db, "task", item_id, author_id, title, result["reason"])
+            else:  # pending
                 db.add(ReviewRecord(
                     content_type="task", content_id=item_id,
                     reviewer_id=None, status="pending",
@@ -189,20 +255,34 @@ async def _handle_message(data: dict):
             if not c or c.status != "published":
                 return
             text = c.content
+            author_id = c.user_id
         result = await ai_review_text(text)
-        if result["pass"] is None:
+        if result["action"] is None:
             raise RuntimeError(f"AI unavailable for {type_} #{item_id} after retries")
-        passed = result["pass"]
-        print(f"AI {'passed' if passed else 'rejected'} comment #{item_id}: {result['reason']}")
+        action = result["action"]
+        print(f"AI [{action}] comment #{item_id}: {result['reason']}")
 
         async with async_session() as db:
-            if passed:
+            if action == "pass":
                 db.add(ReviewRecord(
                     content_type="comment", content_id=item_id,
                     reviewer_id=ai_user_id, status="approved",
                     reason=result["reason"],
                 ))
-            else:
+            elif action == "reject":
+                db.add(ReviewRecord(
+                    content_type="comment", content_id=item_id,
+                    reviewer_id=ai_user_id, status="rejected",
+                    reason=result["reason"],
+                ))
+                c = (await db.execute(
+                    select(Comment).where(Comment.id == item_id)
+                )).scalar_one_or_none()
+                if c:
+                    c.status = "rejected"
+                await db.flush()
+                await _notify_rejected(db, "comment", item_id, author_id, (text or "")[:30], result["reason"])
+            else:  # pending
                 db.add(ReviewRecord(
                     content_type="comment", content_id=item_id,
                     reviewer_id=None, status="pending",
@@ -222,20 +302,17 @@ async def _handle_message(data: dict):
 async def _catch_up_unreviewed():
     """一次性扫描：把已发布但未审核的内容重新入队"""
     async with async_session() as db:
-        # 帖子 + 回复
         posts = (await db.execute(
             select(ForumPost).where(ForumPost.status == "published")
         )).scalars().all()
         for p in posts:
             kind = "post" if p.thread_id is None else "reply"
             await publish_review(kind, p.id)
-        # 任务
         tasks = (await db.execute(
             select(TaskModel).where(TaskModel.status == "published")
         )).scalars().all()
         for t in tasks:
             await publish_review("task", t.id)
-        # 评论
         comments = (await db.execute(
             select(Comment).where(Comment.status == "published")
         )).scalars().all()
@@ -245,10 +322,8 @@ async def _catch_up_unreviewed():
 
 
 async def start_worker():
-    await asyncio.sleep(3)  # 等待 HTTP server 就绪
-    await _catch_up_unreviewed()  # 兜底扫描漏审内容
-
-    # RabbitMQ 容器可能还在启动，无限重试直到连上
+    await asyncio.sleep(3)
+    await _catch_up_unreviewed()
     backoff = 1
     while True:
         try:
