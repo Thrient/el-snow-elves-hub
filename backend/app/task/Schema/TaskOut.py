@@ -8,6 +8,7 @@ class TaskOut(BaseModel):
     description: str | None
     author_id: int
     author_name: str = ""
+    author_avatar_url: str | None = None
     category: str
     tags: str | None
     version: str

@@ -1,11 +1,9 @@
 """AI 审核 Worker — 消费 RabbitMQ → Ollama 审核 → 调管理 API 提交结果"""
 import asyncio
 import base64
-import io
 import json
 
 import httpx
-from PIL import Image
 from sqlalchemy import select
 
 from app.infrastructure.Database import async_session
@@ -23,7 +21,16 @@ OLLAMA_URL = "http://ollama:11434/api/generate"
 MODEL = "minicpm-v:8b"
 API_BASE = "http://localhost:8000/api/v1"
 
-REVIEW_PROMPT = """同时审查文字和图片。仅当文字或图片包含明确的人身攻击（拼音缩写如sb/cnm/nmsl）、色情/裸露、政治敏感时拒绝（pass=false）。不确定/短文本/日常对话/正常图片一律通过（pass=true）。必须回复包含reason的JSON：{"pass": true, "reason": "具体原因"}\n\n内容：\n"""
+REVIEW_PROMPT = """同时审查文字和图片。必须给出明确判断，不得返回不确定。
+
+拒绝条件（pass=false）：
+1.色情/裸露：直接暴露生殖器、女性胸部、性行为、性暗示姿势、情趣内衣
+2.人身攻击：辱骂、诅咒、威胁（含拼音缩写sb/cnm/nmsl等）
+3.政治敏感：攻击国家/政府/领导人、分裂言论、敏感历史事件
+
+reason字段要求：若拒绝，必须引用具体违规内容，例如"图片暴露女性胸部"、"文字含cnm辱骂"、"图片为生殖器特写"。若通过，写"内容正常"。必须JSON：{"pass":true|false,"reason":"具体引用"}
+
+待审：\n"""
 
 _ai_user_id: int | None = None
 
@@ -52,11 +59,7 @@ async def ai_review_text(text: str, image_urls: list[str] | None = None) -> dict
                 try:
                     resp = await cli.get(url)
                     if resp.status_code == 200:
-                        img = Image.open(io.BytesIO(resp.content))
-                        img.thumbnail((512, 512))
-                        buf = io.BytesIO()
-                        img.save(buf, format="JPEG", quality=70)
-                        b64 = base64.b64encode(buf.getvalue()).decode()
+                        b64 = base64.b64encode(resp.content).decode()
                         image_b64s.append(b64)
                 except Exception:
                     pass

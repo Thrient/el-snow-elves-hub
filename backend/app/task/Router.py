@@ -41,6 +41,7 @@ async def _to_task(t: Task, current_user_id: int | None, db: AsyncSession) -> Ta
     return TaskOut(
         id=t.id, title=t.title, description=t.description,
         author_id=t.author_id, author_name=author.username if author else "",
+        author_avatar_url=author.avatar_url if author else None,
         category=t.category, tags=t.tags, version=t.version,
         file_size=t.file_record.size if t.file_record else None,
         cover_url=storage_service.url(t.cover_record.fingerprint) if t.cover_record else None,

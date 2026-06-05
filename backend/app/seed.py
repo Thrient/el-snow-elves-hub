@@ -80,6 +80,7 @@ async def seed():
             select(Role).where(Role.name == "anonymous")
         )).scalar_one()
         anon_perms = ["page:home", "page:download", "page:market", "page:forum", "page:login",
+                     "page:user",
                      "auth:login", "auth:register", "auth:refresh", "auth:verify", "auth:send-verify",
                      "forum:boards", "forum:search", "forum:threads", "forum:view",
                      "task:list", "task:rankings", "task:user", "task:view", "task:comments", "task:download",
@@ -103,7 +104,7 @@ async def seed():
         user_role = (await db.execute(
             select(Role).where(Role.name == "user")
         )).scalar_one()
-        for code in ["page:profile", "auth:resend-verify",
+        for code in ["page:profile", "page:user", "auth:resend-verify",
                      "forum:post", "forum:reply", "forum:like",
                      "forum:update", "forum:delete",
                      "task:create", "task:like", "task:comment", "task:delete",

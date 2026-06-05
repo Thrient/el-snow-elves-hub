@@ -4,6 +4,7 @@ export interface TaskItem {
   description: string | null;
   author_id: number;
   author_name: string;
+  author_avatar_url: string | null;
   category: string;
   tags: string | null;
   version: string;

@@ -141,7 +141,7 @@ const VersionsPage: FC = () => {
               <option>Windows x64</option><option>Windows x86</option><option>macOS ARM</option><option>macOS x64</option><option>Linux x64</option>
             </select>
           </div>
-          <Input placeholder="更新日志 (可选)" value={form.changelog} onChange={(e) => setForm({ ...form, changelog: e.target.value })} />
+          <Input.TextArea rows={4} placeholder="更新日志 (可选，支持换行)" value={form.changelog} onChange={(e) => setForm({ ...form, changelog: e.target.value })} />
           <div className="flex items-center gap-6">
             <div className="flex items-center gap-2"><span className="text-[0.8125rem] text-[#6b5e55]">设为最新版本</span><Switch checked={form.is_latest} onChange={(v) => setForm({ ...form, is_latest: v })} /></div>
             <div className="flex items-center gap-2"><span className="text-[0.8125rem] text-[#6b5e55]">强制更新</span><Switch checked={form.is_mandatory} onChange={(v) => setForm({ ...form, is_mandatory: v })} /></div>
