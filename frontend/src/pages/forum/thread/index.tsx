@@ -124,7 +124,7 @@ const ForumThreadPage: FC = () => {
   const isAuthor = user?.id === thread.author?.id;
 
   return (
-    <div className="max-w-[54rem] mx-auto pt-8">
+    <div className="w-full max-w-[1600px] mx-auto pt-8">
       {/* Nav */}
       <div className="flex items-center justify-between mb-4">
         <Button type="text" icon={<ArrowLeftOutlined />} onClick={() => navigate(-1)} className="text-[#b8afa6] p-0! font-500">返回</Button>
