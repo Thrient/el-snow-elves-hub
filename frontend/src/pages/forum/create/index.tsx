@@ -43,7 +43,7 @@ const ForumCreatePage: FC = () => {
   };
 
   return (
-    <div className="max-w-[49rem] mx-auto pt-8">
+    <div className="w-full max-w-[1600px] mx-auto pt-8">
       {/* Header */}
       <div className="flex items-center justify-between mb-6">
         <div className="flex items-center gap-2.5">
