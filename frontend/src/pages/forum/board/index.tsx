@@ -43,7 +43,7 @@ const ForumBoardPage: FC = () => {
   useEffect(() => { load(); }, [boardNum, page]);
 
   return (
-    <div className="max-w-[55rem] mx-auto pt-8">
+    <div className="w-full max-w-[1600px] mx-auto pt-8">
       {/* Header */}
       <div className="flex items-center justify-between mb-5 gap-3 flex-wrap">
         <div className="flex items-center gap-2">
