@@ -3,14 +3,10 @@ import { Table, Button, Modal, Input, message, Switch, Progress } from "antd";
 import { PlusOutlined, DeleteOutlined, FolderOpenOutlined } from "@ant-design/icons";
 import { useAuthStore } from "@/store/auth";
 import { adminApi } from "@/api/admin";
-import { formatSize, formatSpeed } from "@/util/format";
+import { formatSize } from "@/util/format";
+import { upload } from "@/api/storage";
+import type { UploadProgress } from "@/api/storage";
 import type { AdminVersion } from "@/types";
-
-async function computeSHA256(file: File): Promise<string> {
-  const buffer = await file.arrayBuffer();
-  const hashBuffer = await crypto.subtle.digest("SHA-256", buffer);
-  return Array.from(new Uint8Array(hashBuffer)).map((b) => b.toString(16).padStart(2, "0")).join("");
-}
 
 type UploadStage = "idle" | "hashing" | "checking" | "uploading" | "creating";
 
@@ -23,8 +19,7 @@ const VersionsPage: FC = () => {
   const [folderName, setFolderName] = useState("");
   const [uploadStage, setUploadStage] = useState<UploadStage>("idle");
   const [uploadBytes, setUploadBytes] = useState({ done: 0, total: 0 });
-  const [uploadSpeed, setUploadSpeed] = useState(0);
-  const [fileManifest, setFileManifest] = useState<Record<string, { sha256: string; fingerprint_id?: number; size: number; file: File }>>({});
+  const [fileManifest, setFileManifest] = useState<Record<string, { sha256?: string; fingerprint_id?: number; size: number; file: File }>>({});
   const canManage = useAuthStore((s) => s.hasPerm)("version:create");
 
   const load = () => adminApi.listVersions().then(setVersions);
@@ -35,22 +30,18 @@ const VersionsPage: FC = () => {
     if (folderInputRef.current) folderInputRef.current.value = "";
   };
 
-  const handleFolderSelect = async (e: React.ChangeEvent<HTMLInputElement>) => {
+  const handleFolderSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
     const files = e.target.files;
     if (!files || files.length === 0) return;
     const fileList = Array.from(files);
     const rootName = (fileList[0].webkitRelativePath || "").split("/")[0] || "unknown";
     const totalSize = fileList.reduce((s, f) => s + f.size, 0);
-    setFolderName(rootName); setUploadStage("hashing"); setUploadBytes({ done: 0, total: totalSize });
-    const manifest: Record<string, { sha256: string; fingerprint_id?: number; size: number; file: File }> = {};
-    let hashedBytes = 0;
-    for (let i = 0; i < fileList.length; i++) {
-      const file = fileList[i];
+    setFolderName(rootName); setUploadBytes({ done: 0, total: totalSize });
+    const manifest: Record<string, { sha256?: string; fingerprint_id?: number; size: number; file: File }> = {};
+    for (const file of fileList) {
       const parts = (file.webkitRelativePath || file.name).split("/");
       const relPath = parts.length > 1 ? parts.slice(1).join("/") : (file.webkitRelativePath || file.name);
-      manifest[relPath] = { sha256: await computeSHA256(file), size: file.size, file };
-      hashedBytes += file.size;
-      setUploadBytes({ done: hashedBytes, total: totalSize });
+      manifest[relPath] = { size: file.size, file };
     }
     setFileManifest(manifest); setUploadStage("idle");
   };
@@ -60,39 +51,28 @@ const VersionsPage: FC = () => {
     if (Object.keys(fileManifest).length === 0) return message.warning("请选择版本文件夹");
     setLoading(true);
     try {
-      const entries = Object.entries(fileManifest);
-      const shaList = entries.map(([, v]) => v.sha256);
-      setUploadStage("checking"); setUploadBytes({ done: 0, total: 0 });
-      const { existing, missing } = await adminApi.checkBlobs(shaList);
-      // Capture fingerprint_ids from pre-check
-      const existingMap = new Map(existing.map((e) => [e.sha256, e.fingerprint_id]));
+      const files = Object.values(fileManifest).map((v) => v.file);
       const updatedManifest = { ...fileManifest };
+
+      const results = await upload(files, (p: UploadProgress) => {
+        if (p.phase === "hashing") {
+          setUploadStage("hashing");
+          setUploadBytes({ done: Math.round((p.current / p.total) * files.reduce((s, f) => s + f.size, 0)), total: files.reduce((s, f) => s + f.size, 0) });
+        } else if (p.phase === "checking") {
+          setUploadStage("checking"); setUploadBytes({ done: 0, total: 0 });
+        } else if (p.phase === "uploading") {
+          setUploadStage("uploading");
+          setUploadBytes({ done: Math.round((p.current + (p.filePct || 0) / 100) / p.total * files.reduce((s, f) => s + f.size, 0)), total: files.reduce((s, f) => s + f.size, 0) });
+        }
+      });
+
+      // Map results back to fileManifest paths
+      const fileToFp = new Map(results.map((r) => [r.file, r]));
       for (const [path, info] of Object.entries(updatedManifest)) {
-        const fpId = existingMap.get(info.sha256);
-        if (fpId != null) updatedManifest[path] = { ...info, fingerprint_id: fpId };
+        const result = fileToFp.get(info.file);
+        if (result) updatedManifest[path] = { ...info, sha256: result.sha256, fingerprint_id: result.fingerprint_id };
       }
       setFileManifest(updatedManifest);
-      if (missing.length > 0) {
-        const missingSet = new Set(missing);
-        const missingFiles = entries.filter(([, { sha256 }]) => missingSet.has(sha256));
-        const totalBytes = missingFiles.reduce((s, [, { size }]) => s + size, 0);
-        setUploadStage("uploading"); setUploadBytes({ done: 0, total: totalBytes });
-        let uploadedBytes = 0;
-        for (const [path, { size, file }] of missingFiles) {
-          const t0 = performance.now();
-          const result = await adminApi.uploadBlob(file, (pct) => {
-            const currentFileBytes = Math.round(size * pct / 100);
-            setUploadBytes({ done: uploadedBytes + currentFileBytes, total: totalBytes });
-            const elapsed = performance.now() - t0;
-            if (elapsed > 0) setUploadSpeed(currentFileBytes / elapsed * 1000);
-          });
-          updatedManifest[path] = { ...updatedManifest[path], fingerprint_id: result.fingerprint_id };
-          uploadedBytes += size;
-          setUploadBytes({ done: uploadedBytes, total: totalBytes });
-        }
-        setUploadSpeed(0);
-        setFileManifest(updatedManifest);
-      }
       setUploadStage("creating");
       await adminApi.createVersion({
         version: form.version, platform: form.platform, changelog: form.changelog || undefined,
@@ -168,7 +148,6 @@ const VersionsPage: FC = () => {
                   <Progress percent={Math.round(uploadBytes.total > 0 ? (uploadBytes.done / uploadBytes.total) * 100 : 0)} size="small" status="active" />
                   <div className="flex justify-between text-[0.6875rem] text-[#6b5e55] mt-0.5">
                     <span>{formatSize(uploadBytes.done)} / {formatSize(uploadBytes.total)}</span>
-                    {uploadSpeed > 0 && <span>{formatSpeed(uploadSpeed)}</span>}
                   </div>
                 </div>
               )}
