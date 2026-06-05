@@ -3,12 +3,8 @@ import { Table, Button, Modal, Input, message, Switch, Progress } from "antd";
 import { PlusOutlined, DeleteOutlined, FolderOpenOutlined } from "@ant-design/icons";
 import { useAuthStore } from "@/store/auth";
 import { adminApi } from "@/api/admin";
-import { formatSize } from "@/util/format";
 import { upload } from "@/api/storage";
-import type { UploadProgress } from "@/api/storage";
 import type { AdminVersion } from "@/types";
-
-type UploadStage = "idle" | "hashing" | "checking" | "uploading" | "creating";
 
 const VersionsPage: FC = () => {
   const [versions, setVersions] = useState<AdminVersion[]>([]);
@@ -17,8 +13,9 @@ const VersionsPage: FC = () => {
   const [loading, setLoading] = useState(false);
   const folderInputRef = useRef<HTMLInputElement>(null);
   const [folderName, setFolderName] = useState("");
-  const [uploadStage, setUploadStage] = useState<UploadStage>("idle");
-  const [uploadBytes, setUploadBytes] = useState({ done: 0, total: 0 });
+  const [uploadPct, setUploadPct] = useState(0);
+  const [uploadDetail, setUploadDetail] = useState("");
+  const [uploadPhase, setUploadPhase] = useState("");
   const [fileManifest, setFileManifest] = useState<Record<string, { sha256?: string; fingerprint_id?: number; size: number; file: File }>>({});
   const canManage = useAuthStore((s) => s.hasPerm)("version:create");
 
@@ -26,7 +23,7 @@ const VersionsPage: FC = () => {
   useEffect(() => { load(); }, []);
 
   const resetUpload = () => {
-    setFolderName(""); setFileManifest({}); setUploadStage("idle"); setUploadBytes({ done: 0, total: 0 });
+    setFolderName(""); setFileManifest({}); setUploadPct(0); setUploadDetail(""); setUploadPhase("");
     if (folderInputRef.current) folderInputRef.current.value = "";
   };
 
@@ -35,15 +32,14 @@ const VersionsPage: FC = () => {
     if (!files || files.length === 0) return;
     const fileList = Array.from(files);
     const rootName = (fileList[0].webkitRelativePath || "").split("/")[0] || "unknown";
-    const totalSize = fileList.reduce((s, f) => s + f.size, 0);
-    setFolderName(rootName); setUploadBytes({ done: 0, total: totalSize });
+    setFolderName(rootName);
     const manifest: Record<string, { sha256?: string; fingerprint_id?: number; size: number; file: File }> = {};
     for (const file of fileList) {
       const parts = (file.webkitRelativePath || file.name).split("/");
       const relPath = parts.length > 1 ? parts.slice(1).join("/") : (file.webkitRelativePath || file.name);
       manifest[relPath] = { size: file.size, file };
     }
-    setFileManifest(manifest); setUploadStage("idle");
+    setFileManifest(manifest); setUploadPhase("");
   };
 
   const create = async () => {
@@ -54,16 +50,10 @@ const VersionsPage: FC = () => {
       const files = Object.values(fileManifest).map((v) => v.file);
       const updatedManifest = { ...fileManifest };
 
-      const results = await upload(files, (p: UploadProgress) => {
-        if (p.phase === "hashing") {
-          setUploadStage("hashing");
-          setUploadBytes({ done: Math.round((p.current / p.total) * files.reduce((s, f) => s + f.size, 0)), total: files.reduce((s, f) => s + f.size, 0) });
-        } else if (p.phase === "checking") {
-          setUploadStage("checking"); setUploadBytes({ done: 0, total: 0 });
-        } else if (p.phase === "uploading") {
-          setUploadStage("uploading");
-          setUploadBytes({ done: Math.round((p.current + (p.filePct || 0) / 100) / p.total * files.reduce((s, f) => s + f.size, 0)), total: files.reduce((s, f) => s + f.size, 0) });
-        }
+      const results = await upload(files, (p) => {
+        setUploadPct(p.overallPct);
+        setUploadDetail(p.detail || "");
+        setUploadPhase(p.phase);
       });
 
       // Map results back to fileManifest paths
@@ -73,7 +63,7 @@ const VersionsPage: FC = () => {
         if (result) updatedManifest[path] = { ...info, sha256: result.sha256, fingerprint_id: result.fingerprint_id };
       }
       setFileManifest(updatedManifest);
-      setUploadStage("creating");
+      setUploadDetail("创建版本...");
       await adminApi.createVersion({
         version: form.version, platform: form.platform, changelog: form.changelog || undefined,
         is_latest: form.is_latest, is_mandatory: form.is_mandatory,
@@ -83,7 +73,7 @@ const VersionsPage: FC = () => {
       setForm({ version: "", platform: "Windows x64", changelog: "", is_latest: false, is_mandatory: false });
       resetUpload(); load();
     } catch { /* ErrorToast */ }
-    finally { setLoading(false); setUploadStage("idle"); }
+    finally { setLoading(false); }
   };
 
   const remove = async (id: number) => { try { await adminApi.deleteVersion(id); message.success("已删除"); load(); } catch { /* ErrorToast */ } };
@@ -137,22 +127,14 @@ const VersionsPage: FC = () => {
                 <span className="text-[0.75rem] text-[#6b5e55]">({Object.keys(fileManifest).length} 个文件)</span>
                 <Button type="link" size="small" onClick={resetUpload} className="ml-auto">重新选择</Button>
               </div>
-              {uploadStage === "hashing" && (
-                <div className="mt-1"><Progress percent={Math.round(uploadBytes.total > 0 ? (uploadBytes.done / uploadBytes.total) * 100 : 0)} size="small" status="active" /><p className="text-[0.6875rem] text-[#6b5e55] m-0 mt-0.5">计算指纹 {formatSize(uploadBytes.done)} / {formatSize(uploadBytes.total)}</p></div>
-              )}
-              {uploadStage === "checking" && (
-                <p className="text-[0.6875rem] text-[#6b5e55] m-0 mt-1">检测已存在的文件... {Object.keys(fileManifest).length} 个文件，共 {formatSize(uploadBytes.total)}</p>
-              )}
-              {uploadStage === "uploading" && (
+              {uploadPhase && uploadPhase !== "done" ? (
                 <div className="mt-1">
-                  <Progress percent={Math.round(uploadBytes.total > 0 ? (uploadBytes.done / uploadBytes.total) * 100 : 0)} size="small" status="active" />
-                  <div className="flex justify-between text-[0.6875rem] text-[#6b5e55] mt-0.5">
-                    <span>{formatSize(uploadBytes.done)} / {formatSize(uploadBytes.total)}</span>
-                  </div>
+                  <Progress percent={Math.round(uploadPct)} size="small" status="active" />
+                  <p className="text-[0.6875rem] text-[#6b5e55] m-0 mt-0.5">{uploadDetail}</p>
                 </div>
-              )}
-              {uploadStage === "creating" && <p className="text-[0.6875rem] text-[#6b5e55] m-0 mt-1">创建版本...</p>}
-              {uploadStage === "idle" && folderName && (
+              ) : uploadPhase === "done" ? (
+                <p className="text-[0.6875rem] text-[#22c55e] m-0 mt-1">上传完成</p>
+              ) : (
                 <p className="text-[0.6875rem] text-[#6b5e55] m-0">已就绪 — 点击"创建"开始上传</p>
               )}
             </div>

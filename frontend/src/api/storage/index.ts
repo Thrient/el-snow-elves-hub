@@ -92,12 +92,34 @@ function computeSHA256(file: File, onProgress?: (pct: number) => void): Promise<
   });
 }
 
+// ── Helpers ──
+
+function formatBytes(bytes: number): string {
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+}
+
+function smoothProgress(
+  from: number, to: number, durationMs: number,
+  onFrame: (pct: number) => void,
+  onDone: () => void,
+): void {
+  if (from >= to || durationMs <= 0) { onDone(); return; }
+  const start = performance.now();
+  const step = () => {
+    const t = Math.min((performance.now() - start) / durationMs, 1);
+    onFrame(from + (to - from) * t);
+    if (t < 1) requestAnimationFrame(step); else onDone();
+  };
+  requestAnimationFrame(step);
+}
+
 // ── Progress callback type ──
 export type UploadProgress = {
+  overallPct: number;          // 0-100 unified, feed directly to <Progress percent>
   phase: "hashing" | "checking" | "uploading" | "done";
-  current: number;
-  total: number;
-  filePct?: number;
+  detail?: string;             // e.g. "3.2 MB / 10 MB" or "SHA256 5/10"
 };
 
 // ══════════════════════════════════════════════════
@@ -114,49 +136,75 @@ export async function upload(
 
   if (files.length === 0) return [];
 
-  const total = files.length;
+  const totalBytes = files.reduce((s, f) => s + f.size, 0);
 
-  // ── Phase 1: Compute SHA256 ──
-  onProgress?.({ phase: "hashing", current: 0, total, filePct: 0 });
+  // ── Phase 1: Compute SHA256 (0% → 20%, byte-weighted) ──
+  let hashedBytes = 0;
+  onProgress?.({ overallPct: 0, phase: "hashing", detail: `SHA256 0/${files.length}` });
+
   const filesWithHash: Array<{ file: File; sha256: string }> = [];
   for (let i = 0; i < files.length; i++) {
     const file = files[i];
     const sha256 = await computeSHA256(file, (pct) => {
-      onProgress?.({ phase: "hashing", current: i, total, filePct: pct });
+      const currentHashed = hashedBytes + (file.size * pct / 100);
+      const overallPct = totalBytes > 0 ? (currentHashed / totalBytes) * 20 : 0;
+      onProgress?.({ overallPct, phase: "hashing", detail: `SHA256 ${i + 1}/${files.length}` });
     });
     filesWithHash.push({ file, sha256 });
+    hashedBytes += file.size;
+    const overallPct = totalBytes > 0 ? (hashedBytes / totalBytes) * 20 : 0;
+    onProgress?.({ overallPct, phase: "hashing", detail: `SHA256 ${i + 1}/${files.length}` });
   }
 
-  // ── Phase 2: Batch pre-check ──
-  onProgress?.({ phase: "checking", current: 0, total, filePct: 0 });
+  // ── Phase 2: Batch pre-check (hold at 20%) ──
+  const hashEndPct = totalBytes > 0 ? (hashedBytes / totalBytes) * 20 : 20;
+  onProgress?.({ overallPct: hashEndPct, phase: "checking", detail: `检测 ${filesWithHash.length} 个文件...` });
   const sha256List = filesWithHash.map((f) => f.sha256);
   const { existing } = await uploadApi.check(sha256List);
   const existingMap = new Map(existing.map((e) => [e.sha256, e.fingerprint_id]));
 
-  // ── Phase 3: Upload each file (existing → skip with instant 100%) ──
-  const results: UploadResult[] = [];
-  const totalFiles = filesWithHash.length;
+  // ── Phase 3: Animate existing files (20% → basePct over 600ms) ──
+  const existingBytes = filesWithHash
+    .filter((f) => existingMap.has(f.sha256))
+    .reduce((s, f) => s + f.file.size, 0);
+  const basePct = 20 + (totalBytes > 0 ? (existingBytes / totalBytes) * 80 : 0);
+  const remainingBytes = totalBytes - existingBytes;
 
-  onProgress?.({ phase: "uploading", current: 0, total: totalFiles, filePct: 0 });
+  // Smooth animation for existing files
+  await new Promise<void>((resolve) => {
+    smoothProgress(hashEndPct, basePct, 600,
+      (pct) => onProgress?.({ overallPct: pct, phase: "uploading", detail: `${formatBytes(existingBytes)} 秒传` }),
+      resolve,
+    );
+  });
+
+  // ── Phase 4: Upload remaining files (basePct → 100%, byte-weighted) ──
+  const results: UploadResult[] = [];
+  let uploadedBytes = 0;
+
+  onProgress?.({ overallPct: basePct, phase: "uploading", detail: `${formatBytes(0)} / ${formatBytes(remainingBytes)}` });
 
   for (let i = 0; i < filesWithHash.length; i++) {
     const { file, sha256 } = filesWithHash[i];
     const fpId = existingMap.get(sha256);
     if (fpId != null) {
       results.push({ file, sha256, fingerprint_id: fpId });
-      // Already exists — report as instantly done
-      onProgress?.({ phase: "uploading", current: i, total: totalFiles, filePct: 100 });
       continue;
     }
     const uploadResult = await uploadSingle(file, sha256, (pct) => {
-      onProgress?.({ phase: "uploading", current: i, total: totalFiles, filePct: pct });
+      const currentUploaded = uploadedBytes + (file.size * pct / 100);
+      const overallPct = basePct + (remainingBytes > 0 ? (currentUploaded / remainingBytes) * (100 - basePct) : 0);
+      onProgress?.({ overallPct, phase: "uploading", detail: `${formatBytes(currentUploaded)} / ${formatBytes(remainingBytes)}` });
     });
     results.push({ file, sha256, fingerprint_id: uploadResult.fingerprint_id });
+    uploadedBytes += file.size;
+    const overallPct = basePct + (remainingBytes > 0 ? (uploadedBytes / remainingBytes) * (100 - basePct) : 0);
+    onProgress?.({ overallPct: Math.min(overallPct, 100), phase: "uploading", detail: `${formatBytes(uploadedBytes)} / ${formatBytes(remainingBytes)}` });
   }
 
+  // ── Phase 5: Done ──
+  onProgress?.({ overallPct: 100, phase: "done", detail: "完成" });
   const resultMap = new Map(results.map((r) => [r.file, r]));
-  onProgress?.({ phase: "done", current: total, total });
-
   return files.map((f) => resultMap.get(f)!);
 }
 
@@ -193,7 +241,7 @@ async function uploadSingle(
 // ── Legacy wrapper ──
 export async function uploadFile(file: File, onProgress?: (pct: number) => void): Promise<{ fingerprint_id: number }> {
   const results = await upload(file, (p) => {
-    if (p.total === 1) onProgress?.(p.filePct ?? 0);
+    onProgress?.(p.overallPct);
   });
   return { fingerprint_id: results[0].fingerprint_id };
 }
