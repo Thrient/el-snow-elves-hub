@@ -57,4 +57,6 @@ export const api = {
     instance.put<T>(url, data, config).then((r) => r.data),
   delete: <T>(url: string, config?: Record<string, unknown>) =>
     instance.delete<T>(url, config).then((r) => r.data),
+  upload: <T>(url: string, data: FormData, onUploadProgress?: (e: any) => void) =>
+    instance.post<T>(url, data, { onUploadProgress }).then((r) => r.data),
 };
