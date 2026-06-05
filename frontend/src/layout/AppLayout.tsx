@@ -69,7 +69,7 @@ const AppLayout: FC = () => {
         </div>
       )}
 
-      <Content className="px-4 sm:px-6 lg:px-8 xl:px-12" style={{flex: 1, display: "flex", flexDirection: "column"}}>
+      <Content style={{flex: 1, display: "flex", flexDirection: "column", width: "100%", padding: "0 24px"}}>
         {routesLoading ? (
           <div style={{flex: 1, display: "flex", alignItems: "center", justifyContent: "center"}}>
             <Spin size="large"/>
