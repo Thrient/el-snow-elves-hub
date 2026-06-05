@@ -9,6 +9,7 @@ import FileUploader from "./FileUploader";
 
 const { Title } = Typography;
 type UploadPhase = "idle" | "uploading" | "complete" | "submitting";
+type FilePhase = "hashing" | "checking" | "uploading" | "complete" | "";
 
 const UploadPage: FC = () => {
   const navigate = useNavigate();
@@ -17,6 +18,7 @@ const UploadPage: FC = () => {
   const [coverRecordId, setCoverRecordId] = useState<number | null>(null);
   const [coverUploading, setCoverUploading] = useState(false);
   const [phase, setPhase] = useState<UploadPhase>("idle");
+  const [filePhase, setFilePhase] = useState<FilePhase>("");
   const [progress, setProgress] = useState(0);
   const [uploadedBytes, setUploadedBytes] = useState(0);
   const [zipRecordId, setZipRecordId] = useState<number | null>(null);
@@ -26,15 +28,16 @@ const UploadPage: FC = () => {
   const startUpload = async (f: File) => {
     setFile(f); setPhase("uploading"); setProgress(0); setUploadedBytes(0);
     try {
-      const result = await uploadFile(f, (pct) => {
+      const result = await uploadFile(f, (pct, p) => {
         setProgress(pct);
         setUploadedBytes(Math.round(f.size * pct / 100));
+        if (p) setFilePhase(p as FilePhase);
       });
       setZipRecordId(result.fingerprint_id);
-      setUploadedBytes(f.size); setProgress(100);
+      setUploadedBytes(f.size); setProgress(100); setFilePhase("complete");
       setPhase("complete");
     } catch {
-      setPhase("idle");
+      setFilePhase(""); setPhase("idle");
     }
   };
 
@@ -86,7 +89,7 @@ const UploadPage: FC = () => {
 
       <StepIndicator step={step} />
 
-      <FileUploader phase={phase} file={file} progress={progress} uploadedBytes={uploadedBytes}
+      <FileUploader phase={filePhase || phase} file={file} progress={progress} uploadedBytes={uploadedBytes}
         speed={0} dragOver={dragOver}
         onDrop={handleDrop}
         onDragOver={(e) => { e.preventDefault(); setDragOver(true); }}

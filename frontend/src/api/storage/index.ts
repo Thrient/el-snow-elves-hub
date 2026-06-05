@@ -97,7 +97,8 @@ function computeSHA256(file: File, onProgress?: (pct: number) => void): Promise<
 function formatBytes(bytes: number): string {
   if (bytes < 1024) return `${bytes} B`;
   if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
-  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+  if (bytes < 1024 * 1024 * 1024) return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+  return `${(bytes / (1024 * 1024 * 1024)).toFixed(1)} GB`;
 }
 
 function smoothProgress(
@@ -170,19 +171,23 @@ export async function upload(
   const basePct = 20 + (totalBytes > 0 ? (existingBytes / totalBytes) * 80 : 0);
   const remainingBytes = totalBytes - existingBytes;
 
-  // Smooth animation for existing files
-  await new Promise<void>((resolve) => {
-    smoothProgress(hashEndPct, basePct, 600,
-      (pct) => onProgress?.({ overallPct: pct, phase: "uploading", detail: `${formatBytes(existingBytes)} 秒传` }),
-      resolve,
-    );
-  });
+  // Smooth animation for existing files (skip if no progress callback)
+  if (onProgress && basePct > hashEndPct) {
+    await new Promise<void>((resolve) => {
+      smoothProgress(hashEndPct, basePct, 600,
+        (pct) => onProgress?.({ overallPct: pct, phase: "uploading", detail: `${formatBytes(existingBytes)} 秒传` }),
+        resolve,
+      );
+    });
+  }
 
   // ── Phase 4: Upload remaining files (basePct → 100%, byte-weighted) ──
   const results: UploadResult[] = [];
   let uploadedBytes = 0;
 
-  onProgress?.({ overallPct: basePct, phase: "uploading", detail: `${formatBytes(0)} / ${formatBytes(remainingBytes)}` });
+  if (remainingBytes > 0) {
+    onProgress?.({ overallPct: basePct, phase: "uploading", detail: `${formatBytes(0)} / ${formatBytes(remainingBytes)}` });
+  }
 
   for (let i = 0; i < filesWithHash.length; i++) {
     const { file, sha256 } = filesWithHash[i];
@@ -239,9 +244,12 @@ async function uploadSingle(
 }
 
 // ── Legacy wrapper ──
-export async function uploadFile(file: File, onProgress?: (pct: number) => void): Promise<{ fingerprint_id: number }> {
+export async function uploadFile(
+  file: File,
+  onProgress?: (pct: number, phase: string) => void,
+): Promise<{ fingerprint_id: number }> {
   const results = await upload(file, (p) => {
-    onProgress?.(p.overallPct);
+    onProgress?.(p.overallPct, p.phase);
   });
   return { fingerprint_id: results[0].fingerprint_id };
 }

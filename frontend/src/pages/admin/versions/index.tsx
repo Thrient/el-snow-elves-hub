@@ -72,7 +72,7 @@ const VersionsPage: FC = () => {
       message.success("版本已创建"); setOpen(false);
       setForm({ version: "", platform: "Windows x64", changelog: "", is_latest: false, is_mandatory: false });
       resetUpload(); load();
-    } catch { /* ErrorToast */ }
+    } catch { setUploadPct(0); setUploadDetail(""); setUploadPhase(""); }
     finally { setLoading(false); }
   };
 
