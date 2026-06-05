@@ -90,7 +90,7 @@ async def list_tasks(
         if status:
             q = q.where(Task.status == status)
     else:
-        q = select(Task).where(Task.status == "approved")
+        q = select(Task).where(Task.status == "published")
     if search:
         q = q.where(Task.title.contains(search))
     if category:
@@ -114,7 +114,7 @@ async def rankings(
     period: str = Query("all"), db: AsyncSession = Depends(get_db),
     _=Depends(require_perm_any("task:rankings")),
 ):
-    q = select(Task).where(Task.status == "approved")
+    q = select(Task).where(Task.status == "published")
     if period == "week":
         q = q.where(Task.created_at >= func.now() - 7 * 86400)
     elif period == "month":
@@ -133,7 +133,7 @@ async def list_user_tasks(
     _=Depends(require_perm_any("task:user")),
 ):
     result = await db.execute(
-        select(Task).where(and_(Task.author_id == user_id, Task.status == "approved"))
+        select(Task).where(and_(Task.author_id == user_id, Task.status == "published"))
         .order_by(desc(Task.created_at))
     )
     tasks = [await _to_task(t, user.id if user else None, db) for t in result.scalars().all()]
@@ -361,7 +361,7 @@ async def create_task(
         category=category, tags=tags, version=version,
         file_record_id=file_record.id,
         cover_record_id=cover_record.id if cover_record else None,
-        status="approved",
+        status="published",
     )
     db.add(task)
     await db.commit()
