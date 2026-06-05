@@ -128,9 +128,8 @@ async def seed():
         ai_reviewer_role = (await db.execute(
             select(Role).where(Role.name == "ai-reviewer")
         )).scalar_one()
-        for code in ["forum:review:list", "forum:review", "forum:boards", "forum:search",
-                     "forum:threads", "forum:view", "task:list", "task:view", "task:comments",
-                     "task:approve"]:
+        for code in ["review:list", "review:decide", "forum:boards", "forum:search",
+                     "forum:threads", "forum:view", "task:list", "task:view", "task:comments"]:
             p = (await db.execute(select(Permission).where(Permission.code == code))).scalar_one()
             existing = (await db.execute(
                 select(RolePermission).where(

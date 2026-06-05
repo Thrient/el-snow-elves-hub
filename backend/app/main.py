@@ -10,6 +10,7 @@ from slowapi.middleware import SlowAPIMiddleware
 from starlette.exceptions import HTTPException
 
 from app.api.v1 import router as v1_router
+from app.review.Router import router as review_router
 from app.Config import settings
 from app.infrastructure.Limiter import get_limiter
 from app.infrastructure.Response import http_exception_handler
@@ -36,3 +37,4 @@ async def validation_exception_handler(request: Request, exc: RequestValidationE
     return JSONResponse(status_code=422, content={"code": 422, "message": msg, "data": None})
 
 app.include_router(v1_router, prefix="/api/v1")
+app.include_router(review_router, prefix="/api/v1")

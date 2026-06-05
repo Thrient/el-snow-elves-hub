@@ -23,7 +23,6 @@ PERMISSION_CODES: dict[str, str] = {
     "page:admin-roles": "查看角色管理",
     "page:admin-perms": "查看权限列表",
     "page:admin-versions": "查看版本管理",
-    "page:admin-tasks": "查看任务管理",
     "page:admin-routes": "查看路由管理",
     "dashboard:view": "查看仪表盘数据",
     "public:ping": "健康检查",
@@ -48,10 +47,7 @@ PERMISSION_CODES: dict[str, str] = {
     "task:create": "创建任务",
     "task:like": "点赞任务",
     "task:comment": "发表评论",
-    "task:approve": "审核任务",
     "task:delete": "删除任务",
-    "forum:review:list": "查看帖子审核列表",
-    "forum:review": "审核帖子/评论",
     "forum:boards": "查看论坛板块",
     "forum:search": "搜索帖子",
     "forum:threads": "查看帖子列表",
@@ -98,6 +94,8 @@ PERMISSION_CODES: dict[str, str] = {
     "perm:create": "创建权限",
     "perm:update": "编辑权限",
     "perm:delete": "删除权限",
+    "review:list": "查看审核列表",
+    "review:decide": "审核决定",
 }
 
 # ══════════════════════════════════════════════════════
@@ -122,6 +120,7 @@ PUBLIC_ROUTES: list[RouteSeed] = [
     RouteSeed(path="/download", title="下载", icon="DownloadOutlined", perm="page:download", sort_order=20, component="DownloadPage"),
     RouteSeed(path="/market", title="任务市场", icon="AppstoreOutlined", perm="page:market", sort_order=30, component="MarketPage"),
     RouteSeed(path="/forum", title="论坛", icon="MessageOutlined", perm="page:forum", sort_order=40, component="ForumPage"),
+    RouteSeed(path="/review", title="审核中心", icon="AuditOutlined", perm="review:list", sort_order=50, component="ReviewPage"),
     RouteSeed(path="/upload", title="上传", perm="page:upload", in_menu=False, sort_order=70, component="UploadPage"),
     RouteSeed(path="/profile", title="个人中心", perm="page:profile", in_menu=False, sort_order=80, component="ProfilePage"),
     RouteSeed(path="/user/:userId", title="用户主页", perm="page:user", in_menu=False, sort_order=60, component="AuthorPage"),
@@ -144,9 +143,7 @@ ADMIN_ROUTES: list[RouteSeed] = [
     RouteSeed(path="/admin/roles", title="角色管理", icon="TeamOutlined", perm="page:admin-roles", sort_order=30, component="RolesPage"),
     RouteSeed(path="/admin/permissions", title="权限列表", icon="SafetyCertificateOutlined", perm="page:admin-perms", sort_order=40, component="PermissionsPage"),
     RouteSeed(path="/admin/versions", title="下载版本", icon="CloudDownloadOutlined", perm="page:admin-versions", sort_order=50, component="VersionsPage"),
-    RouteSeed(path="/admin/tasks", title="任务管理", icon="AppstoreOutlined", perm="page:admin-tasks", sort_order=60, component="TasksPage"),
     RouteSeed(path="/admin/routes", title="路由管理", icon="NodeIndexOutlined", perm="page:admin-routes", sort_order=70, component="RoutesPage"),
-    RouteSeed(path="/admin/posts", title="内容审核", icon="AuditOutlined", perm="forum:review:list", in_menu=True, sort_order=80, component="PostsPage"),
 ]
 
 # ── 所有路由的 (path, perm) 对（供测试使用） ──
