@@ -28,12 +28,13 @@ const uploadApi = {
     api.post<{ code: number; data: any }>("/api/v1/uploads/init", { sha256, total_chunks: totalChunks, filename })
       .then((r) => r.data),
 
-  chunk: (sha256: string, n: number, total: number, filename: string, blob: Blob) => {
+  chunk: (sha256: string, n: number, total: number, filename: string, blob: Blob, onProgress?: (e: ProgressEvent) => void) => {
     const form = new FormData();
     form.append("chunk", blob);
-    return api.post(
+    return api.upload(
       `/api/v1/uploads/chunk?sha256=${encodeURIComponent(sha256)}&n=${n}&total=${total}&filename=${encodeURIComponent(filename)}`,
-      form
+      form,
+      onProgress,
     );
   },
 
@@ -41,11 +42,10 @@ const uploadApi = {
     api.post<{ code: number; data: { fingerprint_id: number } }>("/api/v1/uploads/complete", { sha256, total_chunks: totalChunks })
       .then((r) => r.data),
 
-  direct: (file: File): Promise<{ fingerprint_id: number }> => {
+  direct: (file: File, onProgress?: (e: ProgressEvent) => void): Promise<{ fingerprint_id: number }> => {
     const form = new FormData();
     form.append("file", file);
-    return api.post<{ code: number; data: { fingerprint_id: number } }>("/api/v1/uploads/direct", form)
-      .then((r) => r.data);
+    return api.upload("/api/v1/uploads/direct", form, onProgress);
   },
 };
 
@@ -99,6 +99,24 @@ function formatBytes(bytes: number): string {
   if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
   if (bytes < 1024 * 1024 * 1024) return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
   return `${(bytes / (1024 * 1024 * 1024)).toFixed(1)} GB`;
+}
+
+// ── Global concurrency pool ──
+
+const PARALLEL_LIMIT = 3;
+
+async function pooledUpload(
+  tasks: Array<() => Promise<void>>,
+): Promise<void> {
+  const running = new Set<Promise<void>>();
+  for (const task of tasks) {
+    const p = task().then(() => { running.delete(p); });
+    running.add(p);
+    if (running.size >= PARALLEL_LIMIT) {
+      await Promise.race(running);
+    }
+  }
+  await Promise.all(running);
 }
 
 function smoothProgress(
@@ -181,66 +199,113 @@ export async function upload(
     });
   }
 
-  // ── Phase 4: Upload remaining files (basePct → 100%, byte-weighted) ──
+  // ── Phase 4: Upload remaining files (basePct → 100%, byte-weighted, global pool) ──
   const results: UploadResult[] = [];
-  let uploadedBytes = 0;
 
-  if (remainingBytes > 0) {
-    onProgress?.({ overallPct: basePct, phase: "uploading", detail: `${formatBytes(0)} / ${formatBytes(remainingBytes)}` });
-  }
-
-  for (let i = 0; i < filesWithHash.length; i++) {
-    const { file, sha256 } = filesWithHash[i];
+  // 4a. Already-existing files (no upload needed)
+  for (const { file, sha256 } of filesWithHash) {
     const fpId = existingMap.get(sha256);
     if (fpId != null) {
       results.push({ file, sha256, fingerprint_id: fpId });
-      continue;
     }
-    const uploadResult = await uploadSingle(file, sha256, (pct) => {
-      const currentUploaded = uploadedBytes + (file.size * pct / 100);
-      const overallPct = basePct + (remainingBytes > 0 ? (currentUploaded / remainingBytes) * (100 - basePct) : 0);
-      onProgress?.({ overallPct, phase: "uploading", detail: `${formatBytes(currentUploaded)} / ${formatBytes(remainingBytes)}` });
+  }
+
+  // 4b. Init chunked files, collect metadata
+  const filesToUpload = filesWithHash.filter(f => !existingMap.has(f.sha256));
+  const metas: Array<{
+    file: File; sha256: string; totalChunks: number; uploadedSet: Set<number>;
+  }> = [];
+
+  for (const { file, sha256 } of filesToUpload) {
+    if (file.size <= DIRECT_THRESHOLD) {
+      metas.push({ file, sha256, totalChunks: 0, uploadedSet: new Set() });
+    } else {
+      const totalChunks = Math.ceil(file.size / CHUNK_SIZE);
+      const { chunks: existingChunks } = await uploadApi.init(sha256, totalChunks, file.name);
+      metas.push({ file, sha256, totalChunks, uploadedSet: new Set(existingChunks) });
+    }
+  }
+
+  // 4c. Global byte counter + progress emitter
+  let globalUploadedBytes = 0;
+  const emitProgress = () => {
+    if (remainingBytes <= 0) return;
+    const pct = basePct + (globalUploadedBytes / remainingBytes) * (100 - basePct);
+    onProgress?.({
+      overallPct: Math.min(pct, 99.9),
+      phase: "uploading",
+      detail: `${formatBytes(globalUploadedBytes)} / ${formatBytes(remainingBytes)}`,
     });
-    results.push({ file, sha256, fingerprint_id: uploadResult.fingerprint_id });
-    uploadedBytes += file.size;
-    const overallPct = basePct + (remainingBytes > 0 ? (uploadedBytes / remainingBytes) * (100 - basePct) : 0);
-    onProgress?.({ overallPct: Math.min(overallPct, 100), phase: "uploading", detail: `${formatBytes(uploadedBytes)} / ${formatBytes(remainingBytes)}` });
+  };
+  emitProgress();
+
+  // 4d. Build all tasks (direct + chunked) into one flat array
+  const allTasks: Array<() => Promise<void>> = [];
+  const directResults: Array<{ file: File; sha256: string; fingerprint_id: number }> = [];
+
+  for (const meta of metas) {
+    if (meta.totalChunks === 0) {
+      // ── Direct upload (≤10MB): one task per file ──
+      allTasks.push(async () => {
+        let last = 0;
+        const { fingerprint_id } = await uploadApi.direct(meta.file, (e: ProgressEvent) => {
+          globalUploadedBytes += e.loaded - last;
+          last = e.loaded;
+          emitProgress();
+        });
+        globalUploadedBytes += meta.file.size - last;
+        emitProgress();
+        directResults.push({ file: meta.file, sha256: meta.sha256, fingerprint_id });
+      });
+    } else {
+      // ── Chunked upload: count already-uploaded, create task per remaining chunk ──
+      for (const idx of meta.uploadedSet) {
+        const chunkSize = Math.min(CHUNK_SIZE, meta.file.size - idx * CHUNK_SIZE);
+        globalUploadedBytes += chunkSize;
+      }
+      emitProgress();
+
+      for (let i = 0; i < meta.totalChunks; i++) {
+        if (meta.uploadedSet.has(i)) continue;
+        const chunkIndex = i;
+        allTasks.push(async () => {
+          const start = chunkIndex * CHUNK_SIZE;
+          const end = Math.min(start + CHUNK_SIZE, meta.file.size);
+          const blob = meta.file.slice(start, end);
+          let last = 0;
+          await uploadApi.chunk(
+            meta.sha256, chunkIndex, meta.totalChunks, meta.file.name, blob,
+            (e: ProgressEvent) => {
+              globalUploadedBytes += e.loaded - last;
+              last = e.loaded;
+              emitProgress();
+            },
+          );
+          globalUploadedBytes += blob.size - last;
+          emitProgress();
+        });
+      }
+    }
+  }
+
+  // 4e. Execute global pool (limit=3, hardcoded in pooledUpload)
+  await pooledUpload(allTasks);
+
+  // 4f. Collect direct upload results
+  results.push(...directResults);
+
+  // 4g. Complete chunked files
+  for (const meta of metas) {
+    if (meta.totalChunks > 0) {
+      const { fingerprint_id } = await uploadApi.complete(meta.sha256, meta.totalChunks);
+      results.push({ file: meta.file, sha256: meta.sha256, fingerprint_id });
+    }
   }
 
   // ── Phase 5: Done ──
   onProgress?.({ overallPct: 100, phase: "done", detail: "完成" });
   const resultMap = new Map(results.map((r) => [r.file, r]));
   return files.map((f) => resultMap.get(f)!);
-}
-
-// ── Single file dispatch ──
-async function uploadSingle(
-  file: File, sha256: string,
-  onProgress?: (pct: number) => void,
-): Promise<{ fingerprint_id: number }> {
-  if (file.size <= DIRECT_THRESHOLD) {
-    onProgress?.(50);
-    const result = await uploadApi.direct(file);
-    onProgress?.(100);
-    return result;
-  }
-
-  const totalChunks = Math.ceil(file.size / CHUNK_SIZE);
-
-  // init: query existing chunks (no session created)
-  const { chunks: existingChunks } = await uploadApi.init(sha256, totalChunks, file.name);
-  const uploadedSet = new Set(existingChunks);
-
-  for (let i = 0; i < totalChunks; i++) {
-    if (uploadedSet.has(i)) continue;  // skip already-uploaded
-
-    const blob = file.slice(i * CHUNK_SIZE, Math.min((i + 1) * CHUNK_SIZE, file.size));
-    await uploadApi.chunk(sha256, i, totalChunks, file.name, blob);
-    onProgress?.(Math.round((i + 1) / totalChunks * 100));
-  }
-
-  onProgress?.(100);
-  return uploadApi.complete(sha256, totalChunks);
 }
 
 // ── Legacy wrapper ──
