@@ -19,7 +19,7 @@ from app.infrastructure.storage.Schema.CompleteRequest import CompleteRequest
 
 
 @router.post("/init")
-@_limiter.limit("60/minute")
+@_limiter.limit("512/minute")
 async def init_upload(
     request: Request, body: InitRequest,
     user: User = Depends(get_current_user),
@@ -35,7 +35,7 @@ async def init_upload(
 
 
 @router.post("/chunk")
-@_limiter.limit("120/minute")
+@_limiter.limit("10000/minute")
 async def upload_chunk(
     request: Request,
     sha256: str = Query(...),
@@ -63,6 +63,7 @@ async def upload_chunk(
 
 
 @router.post("/complete")
+@_limiter.limit("512/minute")
 async def complete_upload(
     request: Request, body: CompleteRequest,
     user: User = Depends(get_current_user),
@@ -83,7 +84,7 @@ async def complete_upload(
 
 
 @router.post("/direct")
-@_limiter.limit("60/minute")
+@_limiter.limit("512/minute")
 async def direct_upload(
     request: Request,
     file: UploadFile,
