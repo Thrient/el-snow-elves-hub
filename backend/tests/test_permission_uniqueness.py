@@ -20,10 +20,10 @@ API_PERMS: set[str] = {
     "role:list", "role:permissions", "role:create", "role:update", "role:delete",
     "perm:list", "perm:create", "perm:update", "perm:delete",
     "version:create", "version:delete",
-    "task:approve", "forum:review:list", "forum:review",
+    "task:approve", "forum:review:list", "forum:review", "review:decide",
     "admin:routes", "route:create", "route:update", "route:delete", "route:toggle",
     # identity
-    "auth:register", "auth:login", "auth:refresh",
+    "auth:register", "auth:login",
     "user:view", "user:update", "user:email",
     "auth:verify", "auth:send-verify", "auth:resend-verify",
     "user:downloads", "user:likes", "user:avatar",

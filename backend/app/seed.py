@@ -81,7 +81,7 @@ async def seed():
         )).scalar_one()
         anon_perms = ["page:home", "page:download", "page:market", "page:forum", "page:login",
                      "page:user",
-                     "auth:login", "auth:register", "auth:refresh", "auth:verify", "auth:send-verify",
+                     "auth:login", "auth:register", "auth:verify", "auth:send-verify",
                      "forum:boards", "forum:search", "forum:threads", "forum:view",
                      "task:list", "task:rankings", "task:user", "task:view", "task:comments", "task:download",
                      "route:list",

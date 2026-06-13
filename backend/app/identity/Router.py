@@ -7,9 +7,10 @@ from sqlalchemy import select, desc
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.infrastructure.Database import get_db
+from el_token import ElUtil, ElSettings as ElTokenSettings
+
 from app.infrastructure.security.Token import (
-    create_access_token, create_refresh_token, create_verify_token,
-    decode_refresh_token, decode_verify_token,
+    create_verify_token, decode_verify_token,
     hash_password, verify_password,
 )
 from app.infrastructure.Mail import send_email
@@ -53,25 +54,18 @@ def _record_fail(r, fails_key: str, lock_key: str):
         r.setex(lock_key, int(LOCKOUT_DURATION.total_seconds()), "1")
 
 
-def _set_auth_cookies(response: JSONResponse, user: User):
-    sub = str(user.id)
-    access = create_access_token({"sub": sub})
-    refresh = create_refresh_token({"sub": sub}, user.token_version)
-    secure = settings.cookie_secure
-    domain = settings.cookie_domain or None
-    response.set_cookie("access_token", access, httponly=True, secure=secure,
-                        samesite="strict", max_age=settings.jwt_expire_minutes * 60,
-                        domain=domain, path="/")
-    response.set_cookie("refresh_token", refresh, httponly=True, secure=secure,
-                        samesite="strict", max_age=settings.jwt_refresh_expire_days * 86400,
-                        domain=domain, path="/api/v1/auth")
+def _set_auth_cookie(response: JSONResponse, token: str) -> JSONResponse:
+    el_st = ElTokenSettings()
+    domain = el_st.cookie_domain or None
+    response.set_cookie(el_st.token_name, token, httponly=el_st.cookie_http_only,
+                        secure=el_st.cookie_secure, samesite=el_st.cookie_same_site,
+                        max_age=el_st.token_ttl, domain=domain, path="/")
     return response
 
 
-def _clear_auth_cookies(response: JSONResponse) -> JSONResponse:
-    domain = settings.cookie_domain or None
-    response.delete_cookie("access_token", domain=domain, path="/")
-    response.delete_cookie("refresh_token", domain=domain, path="/api/v1/auth")
+def _clear_auth_cookie(response: JSONResponse) -> JSONResponse:
+    el_st = ElTokenSettings()
+    response.delete_cookie(el_st.token_name, domain=el_st.cookie_domain or None, path="/")
     return response
 
 
@@ -136,49 +130,17 @@ async def login(
     if not user.email_verified:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="请先验证邮箱后再登录")
 
-    return _set_auth_cookies(
+    token = ElUtil.login(str(user.id), device="web")
+    return _set_auth_cookie(
         JSONResponse(content={"code": 0, "data": UserResponse.model_validate(user).model_dump(mode="json")}),
-        user,
-    )
-
-
-@router.post("/auth/refresh")
-@_limiter.limit(settings.rate_limit_auth)
-async def refresh_token(
-    request: Request, db: AsyncSession = Depends(get_db),
-    _=Depends(require_perm_any("auth:refresh")),
-):
-    refresh = request.cookies.get("refresh_token")
-    if not refresh:
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="未提供 refresh_token")
-
-    payload = decode_refresh_token(refresh)
-    if not payload:
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="refresh_token 无效或已过期")
-    user_id = payload.get("sub")
-    if not user_id:
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="token 数据缺失")
-
-    user = (await db.execute(select(User).where(User.id == int(user_id)))).scalar_one_or_none()
-    if not user:
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="用户不存在")
-
-    token_ver = payload.get("ver")
-    if token_ver is None or token_ver != user.token_version:
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="refresh_token 已被使用，请重新登录")
-
-    user.token_version += 1
-    await db.commit()
-    await db.refresh(user)
-    return _set_auth_cookies(
-        JSONResponse(content={"code": 0, "data": {"message": "ok"}}),
-        user,
+        token,
     )
 
 
 @router.post("/auth/logout")
 async def logout(request: Request):
-    return _clear_auth_cookies(JSONResponse(content={"code": 0, "data": None}))
+    ElUtil.logout()
+    return _clear_auth_cookie(JSONResponse(content={"code": 0, "data": None}))
 
 
 @router.get("/auth/me", response_model=UserResponse)
@@ -327,19 +289,28 @@ async def my_likes(
 
 @router.post("/users/me/avatar")
 async def set_avatar(
-    record_id: int = Form(...),
+    fingerprint_id: int = Form(...),
     user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
     _=Depends(require_perm_any("user:avatar")),
 ):
-    record = (await db.execute(select(FileRecord).where(FileRecord.id == record_id))).scalar_one_or_none()
-    if not record:
-        raise HTTPException(status.HTTP_400_BAD_REQUEST, detail="上传记录不存在")
-    fp = record.fingerprint
+    # 查指纹
+    fp = (await db.execute(
+        select(Fingerprint).where(Fingerprint.id == fingerprint_id)
+    )).scalar_one_or_none()
+    if not fp:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, detail="指纹不存在")
     if fp.detected_type and fp.detected_type not in ("png", "jpeg", "gif"):
         raise HTTPException(status.HTTP_400_BAD_REQUEST, detail="头像仅支持 PNG / JPEG / GIF 图片")
+
+    # 建 FileRecord
+    record = FileRecord(
+        fingerprint_id=fp.id, filename="avatar", size=fp.size, uploaded_by=user.id,
+    )
+    db.add(record)
+    await db.flush()
 
     user.avatar_record_id = record.id
     await db.commit()
     await db.refresh(user)
-    return ok({"avatar_url": storage_service.url(fp)})
+    return ok({"avatar_url": f"/api/v1/files/{fp.sha256}"})

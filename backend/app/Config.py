@@ -27,8 +27,6 @@ class Settings(BaseSettings):
     # JWT
     jwt_secret: str
     jwt_algorithm: str = "HS256"
-    jwt_expire_minutes: int = 60 * 24 * 7
-    jwt_refresh_expire_days: int = 30
 
     # Cookie
     cookie_secure: bool = True

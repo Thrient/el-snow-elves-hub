@@ -11,6 +11,8 @@ def pytest_configure(config):
     os.environ.setdefault("SECRET_KEY", "test-secret-key-for-tests-only")
     os.environ.setdefault("DATABASE_URL", "sqlite+aiosqlite://")
     os.environ.setdefault("JWT_SECRET", "test-jwt-secret-for-tests-only")
+    os.environ.setdefault("EL_REDIS_URL", "redis://localhost:6379/0")
+    os.environ.setdefault("EL_JWT_SECRET", "test-jwt-secret-for-tests-only")
 
 
 @pytest_asyncio.fixture(autouse=True)
@@ -31,3 +33,13 @@ async def _cleanup_bus():
         await close_bus()
     except Exception:
         pass
+
+
+@pytest_asyncio.fixture(autouse=True)
+async def _fake_redis():
+    """注入 fakeredis 替代真实 Redis，测试结束后清理"""
+    import fakeredis
+    from el_token.ElStore import ElStore
+    ElStore._client = fakeredis.FakeRedis()
+    yield
+    ElStore._client = None

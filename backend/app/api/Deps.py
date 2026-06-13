@@ -6,8 +6,9 @@ from fastapi import Depends, HTTPException, Request, status
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from el_token.ElLogic import ElLogic
+
 from app.infrastructure.Database import get_db
-from app.infrastructure.security.Token import decode_access_token
 from app.identity.entity.User import User
 
 _anon_perms: set[str] | None = None
@@ -33,43 +34,30 @@ def clear_anon_perm_cache():
     _anon_perms = None
 
 
-def _read_token(request: Request) -> str | None:
-    """从 httpOnly Cookie 读取 access_token。"""
-    return request.cookies.get("access_token")
-
-
-async def _user_from_token(token: str | None, db: AsyncSession) -> User | None:
-    if not token:
+async def _user_from_uid(uid: str | None, db: AsyncSession) -> User | None:
+    if not uid:
         return None
-    payload = decode_access_token(token)
-    if not payload:
-        return None
-    user_id = payload.get("sub")
-    if not user_id:
-        return None
-    result = await db.execute(select(User).where(User.id == int(user_id)))
+    result = await db.execute(select(User).where(User.id == int(uid)))
     return result.scalar_one_or_none()
 
 
 async def get_current_user(
-    request: Request,
     db: AsyncSession = Depends(get_db),
 ) -> User:
-    token = _read_token(request)
-    if not token:
+    uid = ElLogic.get_login_id()
+    if not uid:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="未提供认证令牌")
-    user = await _user_from_token(token, db)
+    user = await _user_from_uid(uid, db)
     if not user:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="无效或过期的令牌")
     return user
 
 
 async def get_optional_user(
-    request: Request,
     db: AsyncSession = Depends(get_db),
 ) -> User | None:
-    token = _read_token(request)
-    return await _user_from_token(token, db)
+    uid = ElLogic.get_login_id()
+    return await _user_from_uid(uid, db)
 
 
 def require_perm(perm: str) -> Callable:

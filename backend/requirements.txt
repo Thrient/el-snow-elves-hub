@@ -17,3 +17,4 @@ httpx>=0.27
 aio-pika>=9.5
 Pillow>=11.0
 slowapi>=0.1
+el-token @ file:///D:/Code/el-token

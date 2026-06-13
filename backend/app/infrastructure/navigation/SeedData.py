@@ -29,7 +29,6 @@ PERMISSION_CODES: dict[str, str] = {
     "client:stream": "客户端推送",
     "auth:login": "登录",
     "auth:register": "注册",
-    "auth:refresh": "刷新令牌",
     "auth:verify": "验证邮箱链接",
     "auth:send-verify": "免登录重发验证",
     "auth:resend-verify": "登录后重发验证",

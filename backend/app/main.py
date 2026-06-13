@@ -9,6 +9,8 @@ from slowapi.middleware import SlowAPIMiddleware
 
 from starlette.exceptions import HTTPException
 
+from el_token import ElUtil, ElMiddleware
+
 from app.api.v1 import router as v1_router
 from app.review.Router import router as review_router
 from app.Config import settings
@@ -17,6 +19,8 @@ from app.infrastructure.Response import http_exception_handler
 from app.scheduler.LifeSpan import lifespan
 
 app = FastAPI(title=settings.app_name, lifespan=lifespan)
+
+ElUtil.boot()
 
 app.state.limiter = get_limiter()
 app.add_middleware(SlowAPIMiddleware)
@@ -27,6 +31,7 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+app.add_middleware(ElMiddleware)
 app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
 app.add_exception_handler(HTTPException, http_exception_handler)
 
