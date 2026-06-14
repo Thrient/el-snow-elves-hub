@@ -17,6 +17,7 @@ from app.identity.entity.User import User
 from app.infrastructure.storage.StorageService import storage_service
 from app.notification.Router import create_notification
 from app.infrastructure.EventBus import publish_review
+from app.audit.service import log_audit
 
 router = APIRouter(prefix="/forum", tags=["论坛"])
 
@@ -214,6 +215,7 @@ async def create_thread(
     db.add(p)
     await db.commit()
     await db.refresh(p)
+    await log_audit(user, "create", "post", p.id, "thread: " + body.title, "")
     try:
         await publish_review("post", p.id)
     except Exception as e:
@@ -276,6 +278,7 @@ async def create_reply(
             f"{user.username} 在评论中提到了你",
             f"/forum/post/{thread_id}")
 
+    await log_audit(user, "create", "reply", r.id, "", "")
     try:
         await publish_review("reply", r.id)
     except Exception as e:
@@ -310,6 +313,7 @@ async def update_thread(
     if body.content is not None:
         p.content = body.content
     await db.commit()
+    await log_audit(user, "update", "post", thread_id, "", "")
     return ok({})
 
 
@@ -327,10 +331,13 @@ async def delete_thread(
     child_ids = (await db.execute(select(ForumPost.id).where(ForumPost.thread_id == thread_id))).scalars().all()
     all_ids = [thread_id, *child_ids]
     await db.execute(sa_delete(ForumLike).where(ForumLike.post_id.in_(all_ids)))
+    p_title = p.title
+    p_id = p.id
     for cid in child_ids:
         await db.execute(sa_delete(ForumPost).where(ForumPost.id == cid))
     await db.delete(p)
     await db.commit()
+    await log_audit(user, "delete", "post", p_id, "thread: " + p_title, "")
     return ok({})
 
 
@@ -353,6 +360,7 @@ async def admin_action(
         case "unlock": p.is_locked = False
         case _: raise HTTPException(400, "无效操作")
     await db.commit()
+    await log_audit(user, "update", "post", thread_id, "admin: " + body.action, "")
     return ok({})
 
 

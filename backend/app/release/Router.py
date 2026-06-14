@@ -18,6 +18,7 @@ from app.release.entity.VersionFile import VersionFile
 from app.infrastructure.storage.entity.Fingerprint import Fingerprint
 from app.infrastructure.storage.entity.FileRecord import FileRecord
 from app.infrastructure.storage.MinioClient import client as minio
+from app.audit.service import log_audit
 
 router = APIRouter(tags=["版本管理"])
 
@@ -140,6 +141,7 @@ async def download_blob_by_record(
             headers["Content-Length"] = str(length)
         download_name = record.filename or "blob"
         headers["Content-Disposition"] = f'attachment; filename="{download_name}"'
+        await log_audit(None, "download", "file", record_id, "", "")
         return StreamingResponse(gen, media_type=ct, headers=headers)
 
 
@@ -186,6 +188,7 @@ async def download_version_zip(
                     break
                 yield chunk
 
+        await log_audit(None, "download", "version", version_id, "client v" + v.version, "")
         filename = quote(f"Elves-{v.version}.zip")
         return StreamingResponse(
             generate_zip(),

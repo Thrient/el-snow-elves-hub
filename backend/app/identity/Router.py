@@ -19,6 +19,7 @@ from app.api.Deps import get_current_user, require_perm_any
 from app.infrastructure.Limiter import get_limiter
 from app.Config import settings
 from app.identity.entity.User import User
+from app.audit.service import log_audit
 
 MAX_FAILED_LOGINS = 5
 LOCKOUT_DURATION = timedelta(minutes=15)
@@ -92,6 +93,7 @@ async def register(
 
     await db.commit()
     await db.refresh(user)
+    await log_audit(user, "register", "user", user.id, "username: " + user.username, "")
     token = create_verify_token(user.id)
     await send_email(user.email, "验证你的 Elves 账号",
         f"点击链接验证邮箱：https://elves.elarion.cn/api/v1/auth/verify-email?token={token}\n链接 1 小时内有效。")
@@ -116,6 +118,7 @@ async def login(
     user = (await db.execute(select(User).where(User.email == body.email))).scalar_one_or_none()
     if not user:
         _record_fail(r, fails_key, lock_key)
+        await log_audit(None, "login_fail", "user", None, "email: " + body.email, "")
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="邮箱或密码错误")
 
     if user.is_disabled:
@@ -123,6 +126,7 @@ async def login(
 
     if not verify_password(body.password, user.password_hash):
         _record_fail(r, fails_key, lock_key)
+        await log_audit(None, "login_fail", "user", None, "email: " + body.email, "")
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="邮箱或密码错误")
 
     r.delete(fails_key, lock_key)
@@ -131,6 +135,7 @@ async def login(
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="请先验证邮箱后再登录")
 
     token = ElUtil.login(str(user.id), device="web")
+    await log_audit(user, "login", "user", user.id, "", "")
     return _set_auth_cookie(
         JSONResponse(content={"code": 0, "data": UserResponse.model_validate(user).model_dump(mode="json")}),
         token,
@@ -138,7 +143,11 @@ async def login(
 
 
 @router.post("/auth/logout")
-async def logout(request: Request):
+async def logout(
+    request: Request,
+    user: User = Depends(get_current_user),
+):
+    await log_audit(user, "logout", "user", user.id, "", "")
     ElUtil.logout()
     return _clear_auth_cookie(JSONResponse(content={"code": 0, "data": None}))
 
@@ -159,6 +168,7 @@ async def update_me(
 ):
     if body.username is not None:
         user.username = body.username
+        await log_audit(user, "update", "user", user.id, "changed username", "")
     await db.commit()
     await db.refresh(user)
     return UserResponse.model_validate(user)
@@ -313,4 +323,5 @@ async def set_avatar(
     user.avatar_record_id = record.id
     await db.commit()
     await db.refresh(user)
+    await log_audit(user, "upload", "file", None, "avatar", "")
     return ok({"avatar_url": f"/api/v1/files/{fp.sha256}"})

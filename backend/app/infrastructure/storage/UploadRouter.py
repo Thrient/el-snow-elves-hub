@@ -9,7 +9,9 @@ from app.api.Deps import get_current_user, require_perm_any, require_verified
 from app.infrastructure.Response import ok
 from app.infrastructure.Limiter import get_limiter
 from app.infrastructure.storage.ChunkedUpload import chunked_upload
+from app.infrastructure.storage.entity.Fingerprint import Fingerprint
 from app.identity.entity.User import User
+from app.audit.service import log_audit
 
 router = APIRouter(prefix="/uploads", tags=["文件上传"])
 _limiter = get_limiter()
@@ -80,7 +82,9 @@ async def complete_upload(
         raise HTTPException(400, str(e))
     finally:
         await r.aclose()
-    return ok({"fingerprint_id": result["fingerprint_id"]})
+    fp_id = result["fingerprint_id"]
+    await log_audit(None, "upload", "file", fp_id, "chunked upload", "")
+    return ok({"fingerprint_id": fp_id})
 
 
 @router.post("/direct")
@@ -101,4 +105,6 @@ async def direct_upload(
         )
     finally:
         await r.aclose()
-    return ok({"fingerprint_id": result["fingerprint_id"]})
+    fp_id = result["fingerprint_id"]
+    await log_audit(None, "upload", "file", fp_id, "direct: " + (file.filename or "untitled"), "")
+    return ok({"fingerprint_id": fp_id})

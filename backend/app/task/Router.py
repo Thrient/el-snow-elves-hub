@@ -27,6 +27,7 @@ from app.infrastructure.storage.entity.FileRecord import FileRecord
 from app.infrastructure.storage.StorageService import storage_service
 from app.infrastructure.storage.MinioClient import client as minio
 from app.infrastructure.EventBus import publish_review
+from app.audit.service import log_audit
 
 router = APIRouter(prefix="/tasks", tags=["任务市场"])
 
@@ -226,6 +227,7 @@ async def download_task(
     gen, ct, length = minio.stream(tv.file_record.fingerprint.sha256)
     download_name = f"{t.title}_{tv.version}_{author.username if author else 'unknown'}.zip"
     encoded = quote(download_name)
+    await log_audit(user, "download", "task", task_id, "v" + str(version or "latest"), "")
     headers = {"Content-Disposition": f"attachment; filename*=UTF-8''{encoded}"}
     if length:
         headers["Content-Length"] = str(length)
@@ -245,8 +247,11 @@ async def delete_task(
         raise HTTPException(404, "任务不存在")
 
     await require_owner(task, user)
+    task_title = task.title
+    task_id_val = task.id
     await db.delete(task)
     await db.commit()
+    await log_audit(user, "delete", "task", task_id_val, "task: " + task_title, "")
     return ok({})
 
 
@@ -284,7 +289,7 @@ async def list_comments(
     _=Depends(require_perm_any("task:comments")),
 ):
     result = await db.execute(
-        select(CommentModel).where(CommentModel.task_id == task_id).order_by(CommentModel.created_at)
+        select(CommentModel).where(and_(CommentModel.task_id == task_id, CommentModel.status == "published")).order_by(CommentModel.created_at)
     )
     comment_list = list(result.scalars().all())
     user_ids = {c.user_id for c in comment_list}
@@ -317,6 +322,7 @@ async def create_comment(
     db.add(c)
     t.comment_count += 1
     await db.commit()
+    await log_audit(user, "create", "comment", c.id, "on task " + str(task_id), "")
     try:
         await publish_review("comment", c.id)
     except Exception as e:
@@ -342,6 +348,7 @@ async def delete_comment(
     await db.delete(c)
     t.comment_count = max(0, t.comment_count - 1)
     await db.commit()
+    await log_audit(user, "delete", "comment", comment_id, "", "")
     return ok({})
 
 
@@ -402,6 +409,7 @@ async def create_task(
     db.add(tv)
     await db.commit()
     await db.refresh(task)
+    await log_audit(user, "create", "task", task.id, "task: " + title + " v" + version, "")
     try:
         await publish_review("task", task.id)
     except Exception as e:
@@ -445,6 +453,7 @@ async def update_task(
         t.cover_record_id = cover_record.id
     await db.commit()
     await db.refresh(t)
+    await log_audit(user, "update", "task", task_id, str(task_id), "")
     return ok(await _to_task(t, user.id, db))
 
 
@@ -498,6 +507,7 @@ async def create_task_version(
     t.version = version
     await db.commit()
     await db.refresh(t)
+    await log_audit(user, "create", "task_version", tv.id, "v" + version, "")
     return ok(await _to_task(t, user.id, db))
 
 
@@ -535,6 +545,7 @@ async def replace_version_file(
     )
     tv.file_record_id = file_record.id
     await db.commit()
+    await log_audit(user, "update", "task_version", version_id, "replace file", "")
     return ok({"version_id": tv.id, "file_size": file_record.size})
 
 
@@ -568,6 +579,9 @@ async def delete_task_version(
     if version_count <= 1:
         raise HTTPException(400, "不能删除最后一个版本")
 
+    tv_version = tv.version
+    tv_id = tv.id
     await db.delete(tv)
     await db.commit()
+    await log_audit(user, "delete", "task_version", tv_id, "v" + tv_version, "")
     return ok({})

@@ -8,6 +8,7 @@ from app.api.Deps import get_current_user, require_perm
 from app.infrastructure.Response import ok
 from app.identity.entity.User import User
 from app.review.entity.ReviewRecord import ReviewRecord
+from app.audit.service import log_audit
 from app.review.Schema.DecideRequest import DecideRequest
 from app.forum.entity.ForumPost import ForumPost
 from app.task.entity.Task import Task as TaskModel
@@ -19,19 +20,20 @@ router = APIRouter(prefix="/reviews", tags=["审核中心"])
 
 @router.get("/pending", dependencies=[Depends(require_perm("review:list"))])
 async def list_pending(
-    skip: int = Query(0, ge=0),
-    limit: int = Query(20, ge=1, le=100),
+    page: int = Query(1, ge=1),
+    size: int = Query(20, ge=1, le=100),
+    status: str = Query("pending"),
     db: AsyncSession = Depends(get_db),
 ):
-    count_q = select(func.count(ReviewRecord.id)).where(ReviewRecord.status == "pending")
+    count_q = select(func.count(ReviewRecord.id)).where(ReviewRecord.status == status)
     total = (await db.execute(count_q)).scalar() or 0
 
     q = (
         select(ReviewRecord)
-        .where(ReviewRecord.status == "pending")
+        .where(ReviewRecord.status == status)
         .order_by(ReviewRecord.created_at.desc())
-        .offset(skip)
-        .limit(limit)
+        .offset((page - 1) * size)
+        .limit(size)
     )
     records = (await db.execute(q)).scalars().all()
 
@@ -154,4 +156,5 @@ async def decide_review(
                 )
 
     await db.commit()
+    await log_audit(user, "approve" if body.status == "approved" else "reject", "review", record_id, "review: " + str(body.reason or ""), "")
     return ok()

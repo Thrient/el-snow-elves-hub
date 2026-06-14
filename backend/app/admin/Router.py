@@ -1,10 +1,13 @@
 """管理后台 — 不设统一鉴权，每个端点自管权限"""
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from datetime import datetime
+
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from sqlalchemy import delete, func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.infrastructure.Database import get_db
 from app.api.Deps import get_current_user, require_perm
+from app.infrastructure.Response import ok
 from app.identity.entity.User import User
 from app.release.entity.DownloadVersion import DownloadVersion
 from app.release.entity.VersionFile import VersionFile
@@ -23,6 +26,9 @@ from app.infrastructure.rbac.entity.Permission import Permission as PermissionMo
 from app.infrastructure.rbac.entity.RolePermission import RolePermission
 from app.infrastructure.rbac.entity.UserRole import UserRole
 from app.infrastructure.navigation.entity.Route import Route as RouteModel
+from app.audit.entity.AuditLog import AuditLog
+from app.audit.Schema.AuditLogOut import AuditLogOut
+from app.audit.service import log_audit
 from app.admin.Schema.StatsResponse import StatsResponse
 from app.admin.Schema.UserItem import UserItem, UserRoleUpdate
 from app.admin.Schema.VersionCreate import VersionCreate
@@ -61,7 +67,8 @@ async def list_users(db: AsyncSession = Depends(get_db)):
 
 @router.put("/users/{user_id}/roles",
             dependencies=[Depends(require_perm("user:assign"))])
-async def update_user_roles(user_id: int, body: UserRoleUpdate, db: AsyncSession = Depends(get_db)):
+async def update_user_roles(user_id: int, body: UserRoleUpdate, db: AsyncSession = Depends(get_db),
+                            admin: User = Depends(get_current_user)):
     user = (await db.execute(select(User).where(User.id == user_id))).scalar_one_or_none()
     if not user:
         raise HTTPException(status_code=404, detail="用户不存在")
@@ -69,23 +76,29 @@ async def update_user_roles(user_id: int, body: UserRoleUpdate, db: AsyncSession
     for rid in body.role_ids:
         db.add(UserRole(user_id=user_id, role_id=rid))
     await db.commit()
+    await log_audit(admin, "update", "user", user_id, "roles", "")
     return {"ok": True}
 
 
 @router.put("/users/{user_id}/disable",
             dependencies=[Depends(require_perm("user:disable"))])
-async def toggle_disable_user(user_id: int, db: AsyncSession = Depends(get_db)):
+async def toggle_disable_user(user_id: int, db: AsyncSession = Depends(get_db),
+                              admin: User = Depends(get_current_user)):
     user = (await db.execute(select(User).where(User.id == user_id))).scalar_one_or_none()
     if not user:
         raise HTTPException(status_code=404, detail="用户不存在")
     user.is_disabled = not user.is_disabled
+    new_state = user.is_disabled
     await db.commit()
+    detail = "disabled" if new_state else "enabled"
+    await log_audit(admin, "disable" if new_state else "enable", "user", user_id, detail, "")
     return {"ok": True, "is_disabled": user.is_disabled}
 
 
 @router.delete("/users/{user_id}",
                dependencies=[Depends(require_perm("user:delete"))])
-async def delete_user(user_id: int, db: AsyncSession = Depends(get_db)):
+async def delete_user(user_id: int, db: AsyncSession = Depends(get_db),
+                      admin: User = Depends(get_current_user)):
     user = (await db.execute(select(User).where(User.id == user_id))).scalar_one_or_none()
     if not user:
         raise HTTPException(status_code=404, detail="用户不存在")
@@ -107,6 +120,7 @@ async def delete_user(user_id: int, db: AsyncSession = Depends(get_db)):
     await db.flush()
     await db.delete(user)
     await db.commit()
+    await log_audit(admin, "delete", "user", user_id, "deleted", "")
     return {"ok": True}
 
 # ═══════════════════════════════════════════
@@ -126,7 +140,8 @@ async def list_roles(db: AsyncSession = Depends(get_db)):
 
 @router.put("/roles/{role_id}/permissions",
             dependencies=[Depends(require_perm("role:permissions"))])
-async def update_role_permissions(role_id: int, body: PermUpdate, db: AsyncSession = Depends(get_db)):
+async def update_role_permissions(role_id: int, body: PermUpdate, db: AsyncSession = Depends(get_db),
+                                  admin: User = Depends(get_current_user)):
     role = (await db.execute(select(RoleModel).where(RoleModel.id == role_id))).scalar_one_or_none()
     if not role:
         raise HTTPException(status_code=404, detail="角色不存在")
@@ -134,12 +149,14 @@ async def update_role_permissions(role_id: int, body: PermUpdate, db: AsyncSessi
     for pid in body.permission_ids:
         db.add(RolePermission(role_id=role_id, permission_id=pid))
     await db.commit()
+    await log_audit(admin, "update", "role", role_id, "perms", "")
     return {"ok": True}
 
 
 @router.post("/roles", status_code=status.HTTP_201_CREATED,
              dependencies=[Depends(require_perm("role:create"))])
-async def create_role(body: RoleCreate, db: AsyncSession = Depends(get_db)):
+async def create_role(body: RoleCreate, db: AsyncSession = Depends(get_db),
+                      admin: User = Depends(get_current_user)):
     existing = (await db.execute(select(RoleModel).where(RoleModel.name == body.name))).scalar_one_or_none()
     if existing:
         raise HTTPException(status_code=400, detail="角色名已存在")
@@ -147,6 +164,7 @@ async def create_role(body: RoleCreate, db: AsyncSession = Depends(get_db)):
     db.add(role)
     await db.commit()
     await db.refresh(role)
+    await log_audit(admin, "create", "role", role.id, body.name, "")
     return {"id": role.id, "name": role.name, "description": role.description, "data_scope": role.data_scope, "permissions": []}
 
 
@@ -172,13 +190,15 @@ async def update_role(role_id: int, body: RoleUpdate, db: AsyncSession = Depends
 
 @router.delete("/roles/{role_id}",
                dependencies=[Depends(require_perm("role:delete"))])
-async def delete_role(role_id: int, db: AsyncSession = Depends(get_db)):
+async def delete_role(role_id: int, db: AsyncSession = Depends(get_db),
+                      admin: User = Depends(get_current_user)):
     role = (await db.execute(select(RoleModel).where(RoleModel.id == role_id))).scalar_one_or_none()
     if not role:
         raise HTTPException(status_code=404, detail="角色不存在")
     await db.execute(delete(UserRole).where(UserRole.role_id == role_id))
     await db.delete(role)
     await db.commit()
+    await log_audit(admin, "delete", "role", role_id, "", "")
     return {"ok": True}
 
 # ═══════════════════════════════════════════
@@ -193,7 +213,8 @@ async def list_permissions(db: AsyncSession = Depends(get_db)):
 
 @router.post("/permissions", status_code=status.HTTP_201_CREATED,
              dependencies=[Depends(require_perm("perm:create"))])
-async def create_permission(body: PermCreate, db: AsyncSession = Depends(get_db)):
+async def create_permission(body: PermCreate, db: AsyncSession = Depends(get_db),
+                            admin: User = Depends(get_current_user)):
     existing = (await db.execute(select(PermissionModel).where(PermissionModel.code == body.code))).scalar_one_or_none()
     if existing:
         raise HTTPException(status_code=400, detail="权限码已存在")
@@ -201,12 +222,14 @@ async def create_permission(body: PermCreate, db: AsyncSession = Depends(get_db)
     db.add(perm)
     await db.commit()
     await db.refresh(perm)
+    await log_audit(admin, "create", "permission", perm.id, body.code, "")
     return {"id": perm.id, "code": perm.code, "name": perm.name}
 
 
 @router.put("/permissions/{perm_id}",
             dependencies=[Depends(require_perm("perm:update"))])
-async def update_permission(perm_id: int, body: PermCreate, db: AsyncSession = Depends(get_db)):
+async def update_permission(perm_id: int, body: PermCreate, db: AsyncSession = Depends(get_db),
+                            admin: User = Depends(get_current_user)):
     perm = (await db.execute(select(PermissionModel).where(PermissionModel.id == perm_id))).scalar_one_or_none()
     if not perm:
         raise HTTPException(status_code=404, detail="权限不存在")
@@ -218,12 +241,14 @@ async def update_permission(perm_id: int, body: PermCreate, db: AsyncSession = D
     perm.name = body.name
     await db.commit()
     await db.refresh(perm)
+    await log_audit(admin, "update", "permission", perm_id, "", "")
     return {"id": perm.id, "code": perm.code, "name": perm.name}
 
 
 @router.delete("/permissions/{perm_id}",
                dependencies=[Depends(require_perm("perm:delete"))])
-async def delete_permission(perm_id: int, db: AsyncSession = Depends(get_db)):
+async def delete_permission(perm_id: int, db: AsyncSession = Depends(get_db),
+                            admin: User = Depends(get_current_user)):
     perm = (await db.execute(select(PermissionModel).where(PermissionModel.id == perm_id))).scalar_one_or_none()
     if not perm:
         raise HTTPException(status_code=404, detail="权限不存在")
@@ -232,6 +257,7 @@ async def delete_permission(perm_id: int, db: AsyncSession = Depends(get_db)):
     await db.execute(delete(RolePermission).where(RolePermission.permission_id == perm_id))
     await db.delete(perm)
     await db.commit()
+    await log_audit(admin, "delete", "permission", perm_id, "", "")
     return {"ok": True}
 
 @router.post("/versions", status_code=status.HTTP_201_CREATED)
@@ -269,18 +295,21 @@ async def create_version(body: VersionCreate, user: User = Depends(require_perm(
 
     await db.commit()
     await db.refresh(v)
+    await log_audit(user, "create", "version", v.id, body.version, "")
     return {"ok": True, "id": v.id}
 
 
 @router.delete("/versions/{version_id}",
                dependencies=[Depends(require_perm("version:delete"))])
-async def delete_version(version_id: int, db: AsyncSession = Depends(get_db)):
+async def delete_version(version_id: int, db: AsyncSession = Depends(get_db),
+                         admin: User = Depends(get_current_user)):
     v = (await db.execute(select(DownloadVersion).where(DownloadVersion.id == version_id))).scalar_one_or_none()
     if not v:
         raise HTTPException(status_code=404, detail="版本不存在")
     await db.execute(delete(VersionFile).where(VersionFile.version_id == version_id))
     await db.delete(v)
     await db.commit()
+    await log_audit(admin, "delete", "version", version_id, "", "")
     return {"ok": True}
 
 # ═══════════════════════════════════════════
@@ -303,7 +332,8 @@ async def list_routes(db: AsyncSession = Depends(get_db)):
 
 @router.post("/routes", status_code=status.HTTP_201_CREATED,
              dependencies=[Depends(require_perm("route:create"))])
-async def create_route(body: RouteCreate, db: AsyncSession = Depends(get_db)):
+async def create_route(body: RouteCreate, db: AsyncSession = Depends(get_db),
+                       admin: User = Depends(get_current_user)):
     existing = (await db.execute(
         select(RouteModel).where(RouteModel.path == body.path)
     )).scalar_one_or_none()
@@ -319,12 +349,14 @@ async def create_route(body: RouteCreate, db: AsyncSession = Depends(get_db)):
     db.add(route)
     await db.commit()
     await db.refresh(route)
+    await log_audit(admin, "create", "route", route.id, body.path, "")
     return {"ok": True, "id": route.id}
 
 
 @router.put("/routes/{route_id}",
             dependencies=[Depends(require_perm("route:update"))])
-async def update_route(route_id: int, body: RouteUpdate, db: AsyncSession = Depends(get_db)):
+async def update_route(route_id: int, body: RouteUpdate, db: AsyncSession = Depends(get_db),
+                       admin: User = Depends(get_current_user)):
     route = (await db.execute(
         select(RouteModel).where(RouteModel.id == route_id)
     )).scalar_one_or_none()
@@ -333,25 +365,30 @@ async def update_route(route_id: int, body: RouteUpdate, db: AsyncSession = Depe
     for field, value in body.model_dump(exclude_none=True).items():
         setattr(route, field, value)
     await db.commit()
+    await log_audit(admin, "update", "route", route_id, f"更新 {route.path}", "")
     return {"ok": True}
 
 
 @router.delete("/routes/{route_id}",
                dependencies=[Depends(require_perm("route:delete"))])
-async def delete_route(route_id: int, db: AsyncSession = Depends(get_db)):
+async def delete_route(route_id: int, db: AsyncSession = Depends(get_db),
+                       admin: User = Depends(get_current_user)):
     route = (await db.execute(
         select(RouteModel).where(RouteModel.id == route_id)
     )).scalar_one_or_none()
     if not route:
         raise HTTPException(status_code=404, detail="路由不存在")
+    path = route.path
     await db.delete(route)
     await db.commit()
+    await log_audit(admin, "delete", "route", route_id, f"删除 {path}", "")
     return {"ok": True}
 
 
 @router.put("/routes/{route_id}/toggle",
             dependencies=[Depends(require_perm("route:toggle"))])
-async def toggle_route(route_id: int, body: dict, db: AsyncSession = Depends(get_db)):
+async def toggle_route(route_id: int, body: dict, db: AsyncSession = Depends(get_db),
+                       admin: User = Depends(get_current_user)):
     route = (await db.execute(
         select(RouteModel).where(RouteModel.id == route_id)
     )).scalar_one_or_none()
@@ -359,7 +396,56 @@ async def toggle_route(route_id: int, body: dict, db: AsyncSession = Depends(get
         raise HTTPException(status_code=404, detail="路由不存在")
     route.enabled = body.get("enabled", not route.enabled)
     await db.commit()
+    await log_audit(admin, "update", "route", route_id, f"{'启用' if route.enabled else '禁用'} {route.path}", "")
     return {"ok": True, "enabled": route.enabled}
+
+# ═══════════════════════════════════════════
+# Audit Logs
+# ═══════════════════════════════════════════
+
+@router.get("/audit-logs", dependencies=[Depends(require_perm("admin:audit"))])
+async def list_audit_logs(
+    page: int = Query(1, ge=1),
+    size: int = Query(20, ge=1, le=100),
+    user_id: int | None = Query(None),
+    action: str | None = Query(None),
+    resource_type: str | None = Query(None),
+    start: str | None = Query(None),
+    end: str | None = Query(None),
+    db: AsyncSession = Depends(get_db),
+):
+    q = select(AuditLog)
+    if user_id is not None:
+        q = q.where(AuditLog.user_id == user_id)
+    if action:
+        q = q.where(AuditLog.action == action)
+    if resource_type:
+        q = q.where(AuditLog.resource_type == resource_type)
+    if start:
+        try:
+            q = q.where(AuditLog.created_at >= datetime.fromisoformat(start))
+        except ValueError:
+            pass
+    if end:
+        try:
+            q = q.where(AuditLog.created_at <= datetime.fromisoformat(end))
+        except ValueError:
+            pass
+
+    total = (await db.execute(select(func.count()).select_from(q.subquery()))).scalar() or 0
+    items = (await db.execute(
+        q.order_by(AuditLog.created_at.desc())
+        .offset((page - 1) * size)
+        .limit(size)
+    )).scalars().all()
+
+    return ok({
+        "items": [AuditLogOut.model_validate(item).model_dump(mode="json") for item in items],
+        "total": total,
+        "page": page,
+        "pages": max(1, (total + size - 1) // size),
+    })
+
 
 # ═══════════════════════════════════════════
 # SSE 实时在线数

@@ -95,6 +95,7 @@ PERMISSION_CODES: dict[str, str] = {
     "perm:delete": "删除权限",
     "review:list": "查看审核列表",
     "review:decide": "审核决定",
+    "admin:audit": "查看审计日志",
 }
 
 # ══════════════════════════════════════════════════════
@@ -143,6 +144,7 @@ ADMIN_ROUTES: list[RouteSeed] = [
     RouteSeed(path="/admin/permissions", title="权限列表", icon="SafetyCertificateOutlined", perm="page:admin-perms", sort_order=40, component="PermissionsPage"),
     RouteSeed(path="/admin/versions", title="下载版本", icon="CloudDownloadOutlined", perm="page:admin-versions", sort_order=50, component="VersionsPage"),
     RouteSeed(path="/admin/routes", title="路由管理", icon="NodeIndexOutlined", perm="page:admin-routes", sort_order=70, component="RoutesPage"),
+    RouteSeed(path="/admin/logs", title="审计日志", icon="FileSearchOutlined", perm="admin:audit", sort_order=80, component="LogsPage"),
 ]
 
 # ── 所有路由的 (path, perm) 对（供测试使用） ──

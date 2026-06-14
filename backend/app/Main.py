@@ -10,6 +10,7 @@ from slowapi.middleware import SlowAPIMiddleware
 from starlette.exceptions import HTTPException
 
 from el_token import ElUtil, ElMiddleware
+from app.audit.service import set_request_ip
 
 from app.api.v1 import router as v1_router
 from app.review.Router import router as review_router
@@ -32,6 +33,12 @@ app.add_middleware(
     allow_headers=["*"],
 )
 app.add_middleware(ElMiddleware)
+
+@app.middleware("http")
+async def audit_ip_middleware(request: Request, call_next):
+    set_request_ip(request.client.host if request.client else "")
+    return await call_next(request)
+
 app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
 app.add_exception_handler(HTTPException, http_exception_handler)
 
