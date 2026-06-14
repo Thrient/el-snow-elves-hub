@@ -23,7 +23,7 @@ const PodiumCard: FC<{ task: TaskItem; index: number }> = ({ task, index }) => {
       style={{ animation: `podium-in 0.5s ease-out ${index * 0.1}s both`, boxShadow: m.shadow }}>
       <div className="text-8 mt-4 mb-1" style={{ animation: "medal-shine 2s ease-in-out infinite", animationDelay: `${index * 0.3}s` }}>{m.emoji}</div>
       <div className="font-600 text-[#3d3630] text-[0.9375rem] px-4 text-center truncate max-w-full">{task.title}</div>
-      <div className="text-[0.75rem] text-[#b8afa6] mt-1"><UserOutlined /> {task.author_name}</div>
+      <div className="text-[0.75rem] text-[#b8afa6] mt-1 flex items-center justify-center gap-1">{task.author_avatar_url ? <img src={`${task.author_avatar_url}?q=50`} alt="" className="w-3.5 h-3.5 rounded-full object-cover" /> : <UserOutlined />}{task.author_name}</div>
       <div className="flex gap-4 mt-2 mb-4 text-[0.75rem] text-[#6b5e55]">
         <span className="flex items-center gap-0.5"><DownloadOutlined className="text-[#d4513b]" /> {task.download_count.toLocaleString()}</span>
         <span className="flex items-center gap-0.5"><LikeOutlined className="text-[#b8afa6]" /> {task.like_count.toLocaleString()}</span>
@@ -41,7 +41,7 @@ const RowCard: FC<{ task: TaskItem; index: number }> = ({ task, index }) => {
       <span className="text-[0.8125rem] font-700 text-[#b8afa6] w-8 text-center flex-shrink-0">#{index + 1}</span>
       <div className="flex-1 min-w-0">
         <div className="font-600 text-[#3d3630] text-[0.875rem] truncate">{task.title}</div>
-        <div className="text-[0.7rem] text-[#b8afa6]"><UserOutlined /> {task.author_name}</div>
+        <div className="text-[0.7rem] text-[#b8afa6] flex items-center gap-1">{task.author_avatar_url ? <img src={`${task.author_avatar_url}?q=50`} alt="" className="w-3.5 h-3.5 rounded-full object-cover" /> : <UserOutlined />}{task.author_name}</div>
       </div>
       <span className="flex items-center gap-0.5 text-[0.75rem] text-[#6b5e55] flex-shrink-0">
         <DownloadOutlined className="text-[#d4513b]" /> {task.download_count.toLocaleString()}

@@ -22,7 +22,7 @@ const ThreadCard: FC<Props> = ({ thread: t, children, right }) => {
     >
       <div className="w-11 h-11 rounded-full flex-shrink-0 flex items-center justify-center bg-[linear-gradient(135deg,#f3f0ec,#e8e3dc)] border-2 border-solid border-[#f0ede8] overflow-hidden">
         {t.author?.avatar_url ? (
-          <img src={t.author.avatar_url} alt="" className="w-full h-full rounded-full object-cover" />
+          <img src={`${t.author.avatar_url}?q=50`} alt="" className="w-full h-full rounded-full object-cover" />
         ) : (
           <UserOutlined className="text-lg text-[#b8afa6]" />
         )}

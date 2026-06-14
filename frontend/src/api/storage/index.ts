@@ -45,7 +45,8 @@ const uploadApi = {
   direct: (file: File, onProgress?: (e: ProgressEvent) => void): Promise<{ fingerprint_id: number }> => {
     const form = new FormData();
     form.append("file", file);
-    return api.upload("/api/v1/uploads/direct", form, onProgress);
+    return api.upload<{ code: number; data: { fingerprint_id: number } }>("/api/v1/uploads/direct", form, onProgress)
+      .then((r) => r.data);
   },
 };
 

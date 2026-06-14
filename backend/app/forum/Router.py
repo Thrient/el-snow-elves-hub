@@ -29,7 +29,7 @@ async def _resolve_images(db: AsyncSession, image_ids: list | None) -> list[str]
         select(FileRecord).where(FileRecord.id.in_(image_ids))
     )).scalars().all()
     rec_map = {r.id: r for r in recs}
-    return [storage_service.url(rec_map[rid].fingerprint) for rid in image_ids if rid in rec_map]
+    return [f"/api/v1/files/{rec_map[rid].fingerprint.sha256}" for rid in image_ids if rid in rec_map]
 
 
 

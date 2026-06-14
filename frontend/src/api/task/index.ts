@@ -8,7 +8,7 @@ export const taskApi = {
   get: (id: number) =>
     api.get<{ code: number; data: TaskItem }>(`/api/v1/tasks/${id}`).then((r) => r.data),
 
-  download: (id: number) => `/api/v1/tasks/${id}/download`,
+  download: (id: number, version?: string) => `/api/v1/tasks/${id}/download${version ? `?version=${encodeURIComponent(version)}` : ""}`,
 
   like: (id: number) =>
     api.post<{ code: number; data: { liked: boolean; like_count: number } }>(`/api/v1/tasks/${id}/like`).then((r) => r.data),
@@ -48,4 +48,32 @@ export const taskApi = {
 
   delete: (id: number) =>
     api.delete(`/api/v1/tasks/${id}`),
+
+  update: (id: number, params: Record<string, unknown> | FormData) =>
+    api.put<{ code: number; data: unknown }>(`/api/v1/tasks/${id}`, params).then((r) => r.data),
+
+  createVersion: (taskId: number, params: {
+    version: string;
+    zip_fingerprint_id: number;
+    changelog?: string;
+  }) => {
+    const fd = new FormData();
+    fd.append("version", params.version);
+    fd.append("zip_fingerprint_id", String(params.zip_fingerprint_id));
+    if (params.changelog) fd.append("changelog", params.changelog);
+    return api.post<{ code: number; data: unknown }>(`/api/v1/tasks/${taskId}/versions`, fd).then((r) => r.data);
+  },
+
+  deleteVersion: (taskId: number, versionId: number) =>
+    api.delete<{ code: number; data: unknown }>(`/api/v1/tasks/${taskId}/versions/${versionId}`).then((r) => r.data),
+
+  replaceVersionFile: (taskId: number, versionId: number, params: {
+    zip_fingerprint_id: number;
+    filename?: string;
+  }) => {
+    const fd = new FormData();
+    fd.append("zip_fingerprint_id", String(params.zip_fingerprint_id));
+    if (params.filename) fd.append("filename", params.filename);
+    return api.put<{ code: number; data: unknown }>(`/api/v1/tasks/${taskId}/versions/${versionId}`, fd).then((r) => r.data);
+  },
 };

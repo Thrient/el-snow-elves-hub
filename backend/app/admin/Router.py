@@ -9,6 +9,8 @@ from app.identity.entity.User import User
 from app.release.entity.DownloadVersion import DownloadVersion
 from app.release.entity.VersionFile import VersionFile
 from app.infrastructure.storage.entity.FileRecord import FileRecord
+from app.infrastructure.storage.entity.Fingerprint import Fingerprint
+from app.infrastructure.storage.StorageService import storage_service
 from app.task.entity.Task import Task as TaskModel
 from app.task.entity.Comment import Comment
 from app.task.entity.TaskLike import TaskLike
@@ -367,30 +369,21 @@ import asyncio
 import json
 
 from fastapi import Request as FastAPIRequest
-from app.infrastructure.security.Token import decode_access_token
 from app.infrastructure.sse.OnlineTracker import admin_queues_list, counts, _lock as tracker_lock
 from app.infrastructure.sse.SseConnection import SseConnection
+from el_token.ElLogic import ElLogic
 
 
 async def get_admin_user(
     request: FastAPIRequest,
     db_admin: AsyncSession = Depends(get_db),
 ) -> User:
-    jwt = request.cookies.get("access_token")
-
-    if not jwt:
+    uid = ElLogic.get_login_id()
+    if not uid:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="需要登录")
 
-    payload = decode_access_token(jwt)
-    if not payload:
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="无效或过期的令牌")
-
-    user_id = payload.get("sub")
-    if not user_id:
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="令牌格式错误")
-
     user = (await db_admin.execute(
-        select(User).where(User.id == int(user_id))
+        select(User).where(User.id == int(uid))
     )).scalar_one_or_none()
     if not user:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="用户不存在")

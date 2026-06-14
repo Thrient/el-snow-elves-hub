@@ -7,6 +7,7 @@ class CommentOut(BaseModel):
     task_id: int
     user_id: int
     user_name: str = ""
+    user_avatar_url: str | None = None
     content: str
     parent_id: int | None
     created_at: datetime

@@ -45,7 +45,7 @@ const ReplyCard: FC<Props> = ({ reply: r, floorNum, thread, userId, liked, canMa
       <div className="flex items-center gap-2.5 mb-2.5">
         <div className="w-8.5 h-8.5 rounded-full flex-shrink-0 flex items-center justify-center bg-[linear-gradient(135deg,#f3f0ec,#e8e3dc)] overflow-hidden">
           {r.author?.avatar_url ? (
-            <img src={r.author.avatar_url} alt="" className="w-full h-full rounded-full object-cover" />
+            <img src={`${r.author.avatar_url}?q=50`} alt="" className="w-full h-full rounded-full object-cover" />
           ) : (
             <UserOutlined className="text-sm text-[#b8afa6]" />
           )}

@@ -82,12 +82,12 @@ const RolesPage: FC = () => {
           { title: "角色名", dataIndex: "name", width: 120 },
           { title: "描述", dataIndex: "description", render: (v: string | null) => v || "-" },
           {
-            title: "权限", width: 360,
+            title: "权限", width: 200,
             render: (_: unknown, record: RoleItem) =>
               hasWildcard(record)
                 ? <Tag color="red">超级管理员（全部权限）</Tag>
                 : record.permissions.length
-                  ? record.permissions.map((p) => <Tag key={p.code} className="text-[0.625rem]">{p.name}</Tag>)
+                  ? <span className="text-[0.8125rem] text-[#3d3630]">{record.permissions.length} 项权限</span>
                   : <span className="text-[0.6875rem] text-[#b8afa6]">无权限</span>,
           },
           {

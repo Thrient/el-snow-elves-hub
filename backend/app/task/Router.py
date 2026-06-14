@@ -13,11 +13,12 @@ from app.infrastructure.Database import get_db
 from app.api.Deps import get_current_user, get_data_scope, require_owner, get_optional_user, require_perm_any, require_verified
 from app.infrastructure.Response import ok, fail
 from app.task.entity.Task import Task
+from app.task.entity.TaskVersion import TaskVersion
 from app.task.entity.Comment import Comment as CommentModel
 from app.task.entity.TaskLike import TaskLike
 from app.task.entity.DownloadRecord import DownloadRecord
 from app.task.entity.TaskView import TaskView
-from app.task.Schema.TaskOut import TaskOut
+from app.task.Schema.TaskOut import TaskOut, TaskVersionOut
 from app.task.Schema.CommentOut import CommentOut
 from app.task.Schema.CommentCreate import CommentCreate
 from app.identity.entity.User import User
@@ -38,17 +39,29 @@ async def _to_task(t: Task, current_user_id: int | None, db: AsyncSession) -> Ta
             select(TaskLike).where(and_(TaskLike.task_id == t.id, TaskLike.user_id == current_user_id))
         )).scalar_one_or_none()
         liked = like is not None
+    latest_version = t.versions[0] if t.versions else None
+    versions_out = []
+    for tv in t.versions:
+        versions_out.append(TaskVersionOut(
+            id=tv.id,
+            version=tv.version,
+            file_name=tv.file_record.filename if tv.file_record else None,
+            file_size=tv.file_record.size if tv.file_record else None,
+            changelog=tv.changelog,
+            created_at=tv.created_at,
+        ))
     return TaskOut(
         id=t.id, title=t.title, description=t.description,
         author_id=t.author_id, author_name=author.username if author else "",
         author_avatar_url=author.avatar_url if author else None,
-        category=t.category, tags=t.tags, version=t.version,
-        file_size=t.file_record.size if t.file_record else None,
-        cover_url=storage_service.url(t.cover_record.fingerprint) if t.cover_record else None,
+        category=t.category, tags=t.tags, version=t.current_version,
+        file_size=latest_version.file_record.size if latest_version and latest_version.file_record else None,
+        cover_url=f"/api/v1/files/{t.cover_record.fingerprint.sha256}" if t.cover_record else None,
         status=t.status, view_count=t.view_count,
         download_count=t.download_count, like_count=t.like_count,
         comment_count=t.comment_count,
         liked=liked, created_at=t.created_at,
+        versions=versions_out,
     )
 
 
@@ -172,6 +185,7 @@ async def get_task(
 @router.get("/{task_id}/download")
 async def download_task(
     task_id: int, db: AsyncSession = Depends(get_db),
+    version: str | None = Query(None),
     user: User | None = Depends(get_optional_user),
     request: Request = None,
     _=Depends(require_perm_any("task:download")),
@@ -192,12 +206,25 @@ async def download_task(
         db.add(DownloadRecord(task_id=t.id, user_id=uid, ip_address=ip))
         await db.commit()
 
-    if not t.file_record or not t.file_record.fingerprint:
+    # Find the requested TaskVersion (or latest)
+    if version:
+        tv = (await db.execute(
+            select(TaskVersion).where(
+                and_(TaskVersion.task_id == task_id, TaskVersion.version == version)
+            )
+        )).scalar_one_or_none()
+    else:
+        tv = (await db.execute(
+            select(TaskVersion).where(TaskVersion.task_id == task_id)
+            .order_by(TaskVersion.created_at.desc())
+        )).scalars().first()
+
+    if not tv or not tv.file_record or not tv.file_record.fingerprint:
         raise HTTPException(404, "任务文件不存在")
-    gen, ct, length = minio.stream(t.file_record.fingerprint.sha256)
-    download_name = t.file_record.filename or f"{t.title or 'download'}.zip"
-    if not download_name.endswith(".zip"):
-        download_name += ".zip"
+
+    author = (await db.execute(select(User).where(User.id == t.author_id))).scalar_one_or_none()
+    gen, ct, length = minio.stream(tv.file_record.fingerprint.sha256)
+    download_name = f"{t.title}_{tv.version}_{author.username if author else 'unknown'}.zip"
     encoded = quote(download_name)
     headers = {"Content-Disposition": f"attachment; filename*=UTF-8''{encoded}"}
     if length:
@@ -264,11 +291,12 @@ async def list_comments(
     users = {}
     if user_ids:
         rows = (await db.execute(select(User).where(User.id.in_(user_ids)))).scalars().all()
-        users = {u.id: u.username for u in rows}
+        users = {u.id: u for u in rows}
     comments = [
         CommentOut(
             id=c.id, task_id=c.task_id, user_id=c.user_id,
-            user_name=users.get(c.user_id, ""),
+            user_name=users.get(c.user_id, User()).username,
+            user_avatar_url=users.get(c.user_id, User()).avatar_url,
             content=c.content, parent_id=c.parent_id, created_at=c.created_at,
         )
         for c in comment_list
@@ -359,11 +387,19 @@ async def create_task(
     task = Task(
         title=title, description=description, author_id=user.id,
         category=category, tags=tags, version=version,
-        file_record_id=file_record.id,
+        current_version=version,
         cover_record_id=cover_record.id if cover_record else None,
         status="published",
     )
     db.add(task)
+    await db.flush()
+
+    tv = TaskVersion(
+        task_id=task.id,
+        version=version,
+        file_record_id=file_record.id,
+    )
+    db.add(tv)
     await db.commit()
     await db.refresh(task)
     try:
@@ -371,3 +407,167 @@ async def create_task(
     except Exception as e:
         print(f"Failed to enqueue review for task #{task.id}: {e}")
     return ok(await _to_task(task, user.id, db))
+
+
+# ── Edit ──
+
+@router.put("/{task_id}")
+async def update_task(
+    task_id: int,
+    description: str | None = Form(None),
+    category: str | None = Form(None),
+    tags: str | None = Form(None),
+    cover_fingerprint_id: int | None = Form(None, alias="cover_fingerprint_id"),
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+    _=Depends(require_perm_any("task:create")),
+):
+    t = (await db.execute(select(Task).where(Task.id == task_id))).scalar_one_or_none()
+    if not t:
+        raise HTTPException(404, "任务不存在")
+    if t.author_id != user.id:
+        raise HTTPException(403, "只能编辑自己的任务")
+    if description is not None:
+        t.description = description
+    if category is not None:
+        t.category = category
+    if tags is not None:
+        t.tags = tags
+    if cover_fingerprint_id is not None:
+        cfp = (await db.execute(
+            select(Fingerprint).where(Fingerprint.id == cover_fingerprint_id)
+        )).scalar_one_or_none()
+        if not cfp or cfp.detected_type not in ("png", "jpeg", "gif"):
+            raise HTTPException(400, "封面仅支持 PNG / JPEG / GIF 图片")
+        cover_record = await storage_service.create_record_from_fingerprint(
+            db, cover_fingerprint_id, "cover", user.id,
+        )
+        t.cover_record_id = cover_record.id
+    await db.commit()
+    await db.refresh(t)
+    return ok(await _to_task(t, user.id, db))
+
+
+# ── New Version ──
+
+@router.post("/{task_id}/versions", status_code=201)
+async def create_task_version(
+    task_id: int,
+    version: str = Form(...),
+    changelog: str = Form(""),
+    filename: str = Form(""),
+    zip_fingerprint_id: int = Form(..., alias="zip_fingerprint_id"),
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+    _=Depends(require_perm_any("task:create")),
+):
+    t = (await db.execute(select(Task).where(Task.id == task_id))).scalar_one_or_none()
+    if not t:
+        raise HTTPException(404, "任务不存在")
+    if t.author_id != user.id:
+        raise HTTPException(403, "只能为自己的任务上传新版本")
+
+    # Check duplicate version
+    existing = (await db.execute(
+        select(TaskVersion).where(
+            and_(TaskVersion.task_id == task_id, TaskVersion.version == version)
+        )
+    )).scalar_one_or_none()
+    if existing:
+        raise HTTPException(400, f"版本 {version} 已存在")
+
+    # Validate ZIP fingerprint
+    fp = (await db.execute(
+        select(Fingerprint).where(Fingerprint.id == zip_fingerprint_id)
+    )).scalar_one_or_none()
+    if not fp or fp.detected_type != "zip":
+        raise HTTPException(400, "ZIP 文件指纹无效或类型不匹配")
+
+    file_record = await storage_service.create_record_from_fingerprint(
+        db, zip_fingerprint_id, filename, user.id,
+    )
+
+    tv = TaskVersion(
+        task_id=task_id,
+        version=version,
+        changelog=changelog,
+        file_record_id=file_record.id,
+    )
+    db.add(tv)
+    t.current_version = version
+    t.version = version
+    await db.commit()
+    await db.refresh(t)
+    return ok(await _to_task(t, user.id, db))
+
+
+# ── Replace Version File ──
+
+@router.put("/{task_id}/versions/{version_id}")
+async def replace_version_file(
+    task_id: int, version_id: int,
+    zip_fingerprint_id: int = Form(..., alias="zip_fingerprint_id"),
+    filename: str = Form(""),
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+    _=Depends(require_perm_any("task:create")),
+):
+    t = (await db.execute(select(Task).where(Task.id == task_id))).scalar_one_or_none()
+    if not t:
+        raise HTTPException(404, "任务不存在")
+    if t.author_id != user.id:
+        raise HTTPException(403, "只能修改自己的任务版本")
+
+    tv = (await db.execute(
+        select(TaskVersion).where(and_(TaskVersion.id == version_id, TaskVersion.task_id == task_id))
+    )).scalar_one_or_none()
+    if not tv:
+        raise HTTPException(404, "版本不存在")
+
+    fp = (await db.execute(
+        select(Fingerprint).where(Fingerprint.id == zip_fingerprint_id)
+    )).scalar_one_or_none()
+    if not fp or fp.detected_type != "zip":
+        raise HTTPException(400, "ZIP 文件指纹无效或类型不匹配")
+
+    file_record = await storage_service.create_record_from_fingerprint(
+        db, zip_fingerprint_id, filename, user.id,
+    )
+    tv.file_record_id = file_record.id
+    await db.commit()
+    return ok({"version_id": tv.id, "file_size": file_record.size})
+
+
+# ── Delete Version ──
+
+@router.delete("/{task_id}/versions/{version_id}")
+async def delete_task_version(
+    task_id: int, version_id: int,
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+    _=Depends(require_perm_any("task:delete")),
+):
+    t = (await db.execute(select(Task).where(Task.id == task_id))).scalar_one_or_none()
+    if not t:
+        raise HTTPException(404, "任务不存在")
+    if t.author_id != user.id:
+        raise HTTPException(403, "只能删除自己的任务版本")
+
+    tv = (await db.execute(
+        select(TaskVersion).where(
+            and_(TaskVersion.id == version_id, TaskVersion.task_id == task_id)
+        )
+    )).scalar_one_or_none()
+    if not tv:
+        raise HTTPException(404, "版本不存在")
+
+    # Count remaining versions
+    version_count = (await db.execute(
+        select(func.count()).select_from(TaskVersion).where(TaskVersion.task_id == task_id)
+    )).scalar() or 0
+    if version_count <= 1:
+        raise HTTPException(400, "不能删除最后一个版本")
+
+    await db.delete(tv)
+    await db.commit()
+    return ok({})

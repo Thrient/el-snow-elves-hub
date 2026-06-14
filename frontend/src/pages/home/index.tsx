@@ -1,9 +1,10 @@
 import { useEffect, useState, type FC } from "react";
 import { useNavigate } from "react-router-dom";
 import { Button, Row, Col, Typography, Skeleton, Grid } from "antd";
-import { DownloadOutlined, AppstoreOutlined, UserOutlined, HeartOutlined, ArrowRightOutlined } from "@ant-design/icons";
+import { DownloadOutlined, AppstoreOutlined, ArrowRightOutlined } from "@ant-design/icons";
 import { taskApi } from "@/api/task";
 import type { TaskItem } from "@/types";
+import MarketCard from "@/pages/task/components/MarketCard";
 
 const { Title } = Typography;
 const { useBreakpoint } = Grid;
@@ -103,41 +104,17 @@ const HomePage: FC = () => {
           <Row gutter={[24, 24]}>
             {hotTasks.map((task, idx) => (
               <Col key={task.id} {...SPANS}>
-                <div
-                  onClick={() => navigate(`/market/${task.id}`)}
-                  className="overflow-hidden cursor-pointer bg-white border border-solid border-[#e8e0d5] card-hover"
-                  style={{ borderRadius: "0.375rem" }}
-                >
-                  <div className="h-[9rem] relative overflow-hidden bg-[#f5f2ee]">
-                    {task.cover_url ? (
-                      <img src={task.cover_url} alt="" className="w-full h-full object-cover" />
-                    ) : (
-                      <div className="absolute inset-0 flex items-center justify-center">
-                        <AppstoreOutlined className="text-8 text-[#d4c8b8]" />
-                      </div>
-                    )}
-                    <span
-                      className="absolute top-2.5 left-2.5 text-[0.7rem] font-700 text-white w-[1.4rem] h-[1.4rem] flex items-center justify-center"
-                      style={{
-                        borderRadius: "0.2rem",
-                        background: idx === 0 ? "#c43a2a" : idx === 1 ? "#b87c2c" : idx === 2 ? "#64748b" : "rgba(0,0,0,0.45)",
-                      }}
-                    >
-                      {idx + 1}
-                    </span>
-                  </div>
-
-                  <div className="px-4 py-3.5">
-                    <div className="text-[0.8125rem] font-600 text-[#1a1a1a] truncate mb-2">
-                      {task.title}
-                    </div>
-                    <div className="flex items-center gap-3.5 text-[0.7rem] text-[#8c8078]">
-                      <span className="flex items-center gap-1"><UserOutlined />{task.author_name}</span>
-                      <span className="flex items-center gap-1"><DownloadOutlined />{task.download_count.toLocaleString()}</span>
-                      <span className="flex items-center gap-1"><HeartOutlined />{task.like_count.toLocaleString()}</span>
-                    </div>
-                  </div>
-                </div>
+                <MarketCard task={task} index={idx} coverBadge={
+                  <span
+                    className="absolute top-2.5 left-2.5 text-[0.7rem] font-700 text-white w-[1.4rem] h-[1.4rem] flex items-center justify-center z-10"
+                    style={{
+                      borderRadius: "0.2rem",
+                      background: idx === 0 ? "#c43a2a" : idx === 1 ? "#b87c2c" : idx === 2 ? "#64748b" : "rgba(0,0,0,0.45)",
+                    }}
+                  >
+                    {idx + 1}
+                  </span>
+                } />
               </Col>
             ))}
           </Row>

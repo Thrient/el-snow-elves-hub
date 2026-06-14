@@ -46,16 +46,7 @@ class User(Base):
     def avatar_url(self) -> str | None:
         if not self.avatar_record or not self.avatar_record.fingerprint:
             return None
-        from app.infrastructure.Redis import get_redis
-        r = get_redis()
-        key = f"avatar:{self.avatar_record.fingerprint.id}"
-        cached = r.get(key)
-        if cached:
-            return cached
-        from app.infrastructure.storage.StorageService import storage_service
-        url = storage_service.url(self.avatar_record.fingerprint)
-        r.setex(key, 3300, url)  # 55min, MinIO 签名 1h
-        return url
+        return f"/api/v1/files/{self.avatar_record.fingerprint.sha256}"
 
     @property
     def role_ids(self) -> list[int]:

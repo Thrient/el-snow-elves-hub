@@ -3,8 +3,6 @@ import { bus } from "@/event/bus";
 
 const instance = axios.create();
 
-let refreshPromise: Promise<boolean> | null = null;
-
 instance.interceptors.response.use(
   (res) => res,
   async (err) => {
@@ -16,28 +14,13 @@ instance.interceptors.response.use(
     const msg: string = err.response?.data?.message || `请求错误 (${status})`;
 
     if (status === 401) {
-      // refresh 自身失败 → 跳转登录
-      if (err.config?.url === "/api/v1/auth/refresh") {
-        bus.emit("auth:expired");
-        return Promise.reject(err);
-      }
-      // login/register 的 401 是正常错误（密码错等），不触发 refresh
+      // login/register 的 401 是正常错误（密码错等），不触发登出
       const authUrls = ["/api/v1/auth/login", "/api/v1/auth/register"];
       if (authUrls.includes(err.config?.url || "")) {
         bus.emit("app:error", msg);
         return Promise.reject(err);
       }
-      // 其他 401 → 尝试 refresh token
-      if (!refreshPromise) {
-        refreshPromise = instance.post("/api/v1/auth/refresh").then(
-          () => true,
-          () => false,
-        ).finally(() => { refreshPromise = null; });
-      }
-      const ok = await refreshPromise;
-      if (ok && err.config) {
-        return instance(err.config);
-      }
+      // 其他 401 → 会话已失效（el_token 服务端自动续期，真 401 即不可恢复）
       bus.emit("auth:expired");
     } else {
       // 非 401 错误 → 全局 toast

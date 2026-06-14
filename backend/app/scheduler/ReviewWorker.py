@@ -1,7 +1,8 @@
-"""AI 审核 Worker — 消费 RabbitMQ → Ollama 审核 → 直接写 DB"""
+"""AI 审核 Worker — 消费 RabbitMQ → llama.cpp 审核 → 直接写 DB"""
 import asyncio
 import base64
 import json
+import re
 
 import httpx
 from sqlalchemy import select
@@ -18,18 +19,17 @@ from app.review.entity.ReviewRecord import ReviewRecord
 from app.notification.Router import create_notification
 
 AI_EMAIL = "ai-reviewer@elarion.cn"
-OLLAMA_URL = "http://ollama:11434/api/generate"
-MODEL = "minicpm-v:8b"
+LLAMA_URL = "http://ollama:8080/v1/chat/completions"
+LLAMA_MODEL = "qwen"
 
-REVIEW_PROMPT = """检查内容是否包含以下违规：
-- 人身攻击（包括拼音缩写如 sb/cnm/nmsl）
-- 色情/低俗内容
-- 政治敏感
+REVIEW_PROMPT = """检查以下内容是否包含明确的违规：
+- 人身攻击/辱骂（含拼音缩写 sb/cnm/nmsl 等）
+- 色情低俗内容
+- 政治敏感内容
 
-返回 JSON：{"action":"pass|pending|reject","reason":"原因"}
-- 明确违规 → action=reject
-- 不确定但可疑 → action=pending
-- 正常内容 → action=pass
+重要：只标记极其明确、证据充分的违规。描述自动化脚本、游戏辅助、茶馆说书等日常话题都是正常内容。
+
+输出 JSON：{"action":"pass|pending|reject","reason":"原因"}
 
 待审：\n"""
 
@@ -49,37 +49,86 @@ async def _get_ai_user_id() -> int:
     return _ai_user_id
 
 
+def _extract_json(text: str) -> dict | None:
+    """从模型输出中提取 JSON 对象。支持：
+    - 纯 JSON: {"action": "pass"}
+    - Markdown 代码块: ```json\\n{...}\\n```
+    - 前缀文本 + JSON: 一些文字...\\n{"action": "pass"}
+    """
+    if not text:
+        return None
+    # 尝试直接解析
+    try:
+        return json.loads(text.strip())
+    except json.JSONDecodeError:
+        pass
+    # 提取 markdown ```json ... ``` 代码块
+    m = re.search(r"```(?:json)?\s*(\{.*?\})\s*```", text, re.DOTALL)
+    if m:
+        try:
+            return json.loads(m.group(1))
+        except json.JSONDecodeError:
+            pass
+    # 提取最后一个 JSON 对象
+    for m in re.finditer(r"\{[^{}]*\"action\"[^{}]*\}", text):
+        try:
+            return json.loads(m.group())
+        except json.JSONDecodeError:
+            continue
+    return None
+
+
 async def ai_review_text(text: str, image_urls: list[str] | None = None) -> dict:
-    """调 Ollama 审查，返回 {"action": "pass"|"pending"|"reject"|None, "reason": str}"""
+    """调 llama.cpp 审查，返回 {"action": "pass"|"pending"|"reject"|None, "reason": str}"""
     prompt = REVIEW_PROMPT + text
 
-    image_b64s: list[str] = []
+    # 构建 messages — 纯文本或带图片
     if image_urls:
+        image_b64s: list[str] = []
         async with httpx.AsyncClient(timeout=120) as cli:
             for url in image_urls:
+                # _resolve_images 返回的是相对路径，需要拼完整 URL（容器内回环）
+                full_url = f"http://localhost:8000{url}"
                 try:
-                    resp = await cli.get(url)
+                    resp = await cli.get(full_url)
                     if resp.status_code == 200:
                         b64 = base64.b64encode(resp.content).decode()
                         image_b64s.append(b64)
-                except Exception:
-                    pass
+                    else:
+                        print(f"AI review: image download failed {full_url} HTTP {resp.status_code}")
+                except Exception as e:
+                    print(f"AI review: image download error {full_url}: {e}")
+        if image_b64s:
+            content_parts = [{"type": "text", "text": prompt}]
+            for b64 in image_b64s:
+                content_parts.append({
+                    "type": "image_url",
+                    "image_url": {"url": f"data:image/jpeg;base64,{b64}"},
+                })
+            messages = [{"role": "user", "content": content_parts}]
+        else:
+            # 有图片 URL 但下载全失败 — 标记为待人工审核
+            print(f"AI review: all {len(image_urls)} image(s) failed to download, flagging for manual review")
+            return {"action": "pending", "reason": "图片无法下载，需要人工审核"}
+    else:
+        messages = [{"role": "user", "content": prompt}]
 
     last_error = None
     for attempt in range(3):
         try:
-            body: dict = {
-                "model": MODEL, "prompt": prompt,
-                "stream": False, "format": "json", "keep_alive": "10m",
+            body = {
+                "model": LLAMA_MODEL, "messages": messages,
+                "stream": False, "max_tokens": 32768,
             }
-            if image_b64s:
-                body["images"] = image_b64s
             async with httpx.AsyncClient(timeout=120) as cli:
-                resp = await cli.post(OLLAMA_URL, json=body)
+                resp = await cli.post(LLAMA_URL, json=body)
                 data = resp.json()
-                raw = data["response"]
-                result = json.loads(raw)
-                action = result.get("action", "pending")
+                msg = data["choices"][0]["message"]
+                raw = msg.get("content") or msg.get("reasoning_content") or ""
+                result = _extract_json(raw)
+                if result is None:
+                    raise ValueError(f"无法解析 JSON: {raw[:200]}")
+                action = result.get("action", "pass")
                 reason = result.get("reason", "")
                 if action not in ("pass", "pending", "reject"):
                     action = "pending"
@@ -89,7 +138,7 @@ async def ai_review_text(text: str, image_urls: list[str] | None = None) -> dict
         except (httpx.TimeoutException, httpx.ConnectError, httpx.RemoteProtocolError):
             last_error = "network error"
         except Exception as e:
-            last_error = str(e)[:100]
+            last_error = str(e)[:200]
         if attempt < 2:
             await asyncio.sleep(2)
     # 3 次重试都失败
@@ -104,7 +153,7 @@ async def _resolve_images(image_ids: list | None) -> list[str]:
         recs = (await db.execute(
             select(FileRecord).where(FileRecord.id.in_(image_ids))
         )).scalars().all()
-        return [storage_service.url(r.fingerprint) for r in recs]
+        return [f"/api/v1/files/{r.fingerprint.sha256}" for r in recs]
 
 
 async def _notify_rejected(

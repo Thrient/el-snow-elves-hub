@@ -1,4 +1,4 @@
-import type { FC } from "react";
+import type { FC, ReactNode } from "react";
 import { useNavigate } from "react-router-dom";
 import { Tag } from "antd";
 import { DownloadOutlined, LikeOutlined, CommentOutlined, UserOutlined, AppstoreOutlined } from "@ant-design/icons";
@@ -7,9 +7,10 @@ import type { TaskItem } from "@/types";
 interface Props {
   task: TaskItem;
   index: number;
+  coverBadge?: ReactNode;
 }
 
-const MarketCard: FC<Props> = ({ task, index }) => {
+const MarketCard: FC<Props> = ({ task, index, coverBadge }) => {
   const navigate = useNavigate();
   const delay = `${index * 0.04}s`;
 
@@ -23,16 +24,18 @@ const MarketCard: FC<Props> = ({ task, index }) => {
       {task.cover_url ? (
         <div className="h-[9.4rem] relative overflow-hidden bg-[#f3f0ec]">
           <img
-            src={task.cover_url}
+            src={`${task.cover_url}?q=40`}
             alt={task.title}
             loading="lazy"
             className="w-full h-full object-cover transition-transform duration-400 hover:scale-106"
           />
+          {coverBadge}
           <div className="absolute bottom-0 left-0 right-0 h-12 bg-[linear-gradient(transparent,rgba(0,0,0,0.3))]" />
         </div>
       ) : (
-        <div className="h-[9.4rem] flex items-center justify-center bg-[linear-gradient(145deg,#f5f0e8,#ebe4d8)]">
+        <div className="h-[9.4rem] relative flex items-center justify-center bg-[linear-gradient(145deg,#f5f0e8,#ebe4d8)]">
           <AppstoreOutlined className="text-9 text-[#d4c8b8]" />
+          {coverBadge}
         </div>
       )}
 
@@ -49,8 +52,13 @@ const MarketCard: FC<Props> = ({ task, index }) => {
           {task.title}
         </div>
 
-        <div className="text-[0.6875rem] text-[#b8afa6] mb-2">
-          <UserOutlined className="mr-1" />{task.author_name}
+        <div className="text-[0.6875rem] text-[#b8afa6] mb-2 flex items-center gap-1">
+          {task.author_avatar_url ? (
+            <img src={`${task.author_avatar_url}?q=50`} alt="" className="w-4 h-4 rounded-full object-cover flex-shrink-0" />
+          ) : (
+            <UserOutlined />
+          )}
+          {task.author_name}
         </div>
 
         <div className="flex gap-3.5 text-[0.6875rem] text-[#b8afa6] pt-2">

@@ -106,7 +106,7 @@ const ForumBoardPage: FC = () => {
                 </div>
                 {t.image_urls && t.image_urls.length > 0 && (
                   <div className="w-15 h-11 rounded-1.5 overflow-hidden flex-shrink-0 bg-[#f3f0ec]">
-                    <img src={t.image_urls[0]} alt="" className="w-full h-full object-cover" />
+                    <img src={`${t.image_urls[0]}?q=40`} alt="" className="w-full h-full object-cover" />
                   </div>
                 )}
               </div>

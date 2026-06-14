@@ -6,6 +6,7 @@ from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.infrastructure.Database import Base
 from app.infrastructure.storage.entity.FileRecord import FileRecord
+from app.task.entity.TaskVersion import TaskVersion
 
 
 class Task(Base):
@@ -17,13 +18,9 @@ class Task(Base):
     author_id: Mapped[int] = mapped_column(ForeignKey("users.id"), nullable=False)
     category: Mapped[str] = mapped_column(String(32), default="综合")
     tags: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    cover_record_id: Mapped[int | None] = mapped_column(Integer, ForeignKey("file_records.id"), nullable=True)
     version: Mapped[str] = mapped_column(String(32), default="1.0.0")
-    file_record_id: Mapped[int | None] = mapped_column(
-        ForeignKey("file_records.id"), nullable=True, comment="ZIP 文件上传记录"
-    )
-    cover_record_id: Mapped[int | None] = mapped_column(
-        ForeignKey("file_records.id"), nullable=True, comment="封面图上传记录"
-    )
+    current_version: Mapped[str] = mapped_column(String(32), default="1.0.0")
     status: Mapped[str] = mapped_column(String(16), default="published")
     view_count: Mapped[int] = mapped_column(Integer, default=0)
     download_count: Mapped[int] = mapped_column(Integer, default=0)
@@ -34,11 +31,11 @@ class Task(Base):
         DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
     )
 
-    file_record: Mapped["FileRecord | None"] = relationship(
-        "FileRecord", foreign_keys=[file_record_id], lazy="selectin"
-    )
-    cover_record: Mapped["FileRecord | None"] = relationship(
-        "FileRecord", foreign_keys=[cover_record_id], lazy="selectin"
+    cover_record = relationship("FileRecord", foreign_keys=[cover_record_id], lazy="selectin")
+
+    versions: Mapped[list["TaskVersion"]] = relationship(
+        "TaskVersion", back_populates="task", lazy="selectin",
+        order_by="TaskVersion.created_at.desc()", cascade="all, delete-orphan"
     )
 
     def __repr__(self) -> str:

@@ -196,10 +196,6 @@ const LoginPage: FC = () => {
             </p>
           </div>
 
-          <p className="mt-8 text-[0.6875rem] text-[#c4bbb2] flex items-center gap-1.5" style={{ animation: "fadeIn .8s .5s both" }}>
-            <span className="w-1.5 h-1.5 rounded-full bg-[#52c41a] inline-block" style={{ animation: "pulseDot 2s infinite" }} />
-            已部署至 NAS · 数据安全可控
-          </p>
         </div>
       </div>
     </div>

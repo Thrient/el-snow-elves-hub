@@ -13,8 +13,6 @@ class UserUpdate(BaseModel):
             return v
         if not v.strip():
             raise ValueError("用户名不能为空")
-        if len(v) < 5 or len(v) > 12:
-            raise ValueError("用户名 5-12 个字符")
         if re.search(r'[<>"\'&/]', v):
             raise ValueError("用户名不能包含特殊字符")
         return v

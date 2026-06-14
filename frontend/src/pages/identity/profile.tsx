@@ -53,7 +53,6 @@ const ProfilePage: FC = () => {
   const save = async () => {
     const v = username.trim();
     if (!v) return message.warning("用户名不能为空");
-    if (v.length < 5 || v.length > 12) return message.warning("用户名 5-12 个字符");
     if (/[<>"'&/]/.test(v)) return message.warning("用户名不能包含特殊字符");
     try {
       await authApi.updateProfile(v);

@@ -44,7 +44,7 @@ const PostDetail: FC<Props> = ({ thread, liked, canManage, isAuthor, onLike, onE
       <div className="flex items-center gap-3 pb-4 mb-4">
         <div className="w-12 h-12 rounded-full flex-shrink-0 flex items-center justify-center bg-[linear-gradient(135deg,#f5f0e8,#ebe4d8)] overflow-hidden">
           {thread.author?.avatar_url ? (
-            <img src={thread.author.avatar_url} alt="" className="w-full h-full rounded-full object-cover" />
+            <img src={`${thread.author.avatar_url}?q=50`} alt="" className="w-full h-full rounded-full object-cover" />
           ) : (
             <UserOutlined className="text-xl text-[#b8afa6]" />
           )}

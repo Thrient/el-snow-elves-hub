@@ -10,8 +10,10 @@ from sqlalchemy import select, func, desc, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.infrastructure.Database import get_db
-from app.infrastructure.security.Token import decode_access_token
 from app.api.Deps import get_current_user, require_perm_any
+from el_token.ElLogic import ElLogic
+from el_token.ElToken import ElToken
+from el_token.ElSettings import ElSettings
 from app.infrastructure.Response import ok
 from app.notification.entity.Notification import Notification
 from app.identity.entity.User import User
@@ -83,20 +85,10 @@ async def _sse_generator(user_id: int):
 async def notification_stream(request: Request, db: AsyncSession = Depends(get_db)):
     from app.infrastructure.sse.OnlineTracker import connect as online_connect, disconnect as online_disconnect
 
-    token = request.cookies.get("access_token")
-    if not token:
-        raise HTTPException(401, "未提供认证令牌")
-    payload = decode_access_token(token)
-    if not payload:
-        raise HTTPException(401, "token 无效")
-    uid = payload.get("sub")
+    uid = ElLogic.get_login_id()
     if not uid:
-        raise HTTPException(401, "token 数据缺失")
-
-    user = (await db.execute(select(User).where(User.id == int(uid)))).scalar_one_or_none()
-    if not user:
-        raise HTTPException(401, "用户不存在")
-    user_id = user.id
+        raise HTTPException(401, "未登录")
+    user_id = int(uid)
 
     web_client_id, _ = await online_connect("web")
 
