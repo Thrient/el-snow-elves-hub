@@ -49,7 +49,10 @@ export const useAuthStore = create<AuthState>((set, get) => ({
   },
 
   logout: async () => {
-    try { await api.post("/api/v1/auth/logout"); } catch { /* ignore */ }
+    const uid = get().user?.id;
+    if (uid) {
+      try { await api.post("/api/v1/auth/logout"); } catch { /* ignore */ }
+    }
     set({ user: null });
   },
 

@@ -96,6 +96,7 @@ PERMISSION_CODES: dict[str, str] = {
     "review:list": "查看审核列表",
     "review:decide": "审核决定",
     "admin:audit": "查看审计日志",
+    "ai:vision": "AI 视觉识别",
 }
 
 # ══════════════════════════════════════════════════════

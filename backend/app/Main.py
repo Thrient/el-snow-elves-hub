@@ -16,7 +16,8 @@ from app.api.v1 import router as v1_router
 from app.review.Router import router as review_router
 from app.Config import settings
 from app.infrastructure.Limiter import get_limiter
-from app.infrastructure.Response import http_exception_handler
+from app.infrastructure.ConcurrencyMiddleware import ConcurrencyMiddleware
+from app.infrastructure.Response import http_exception_handler, business_exception_handler, general_exception_handler, BusinessException
 from app.scheduler.LifeSpan import lifespan
 
 app = FastAPI(title=settings.app_name, lifespan=lifespan)
@@ -33,14 +34,22 @@ app.add_middleware(
     allow_headers=["*"],
 )
 app.add_middleware(ElMiddleware)
+app.add_middleware(ConcurrencyMiddleware)
 
 @app.middleware("http")
 async def audit_ip_middleware(request: Request, call_next):
-    set_request_ip(request.client.host if request.client else "")
+    forwarded = request.headers.get("X-Forwarded-For")
+    if forwarded:
+        ip = forwarded.split(",")[0].strip()
+    else:
+        ip = request.headers.get("X-Real-IP") or (request.client.host if request.client else "")
+    set_request_ip(ip)
     return await call_next(request)
 
 app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
 app.add_exception_handler(HTTPException, http_exception_handler)
+app.add_exception_handler(BusinessException, business_exception_handler)
+app.add_exception_handler(Exception, general_exception_handler)
 
 
 @app.exception_handler(RequestValidationError)

@@ -23,7 +23,7 @@ async def log_audit(
     ip = ip or _request_ip.get()
     log = AuditLog(
         user_id=user.id if user else None,
-        username=user.username if user else "",
+        username=user.username if user else "匿名用户",
         action=action,
         resource_type=resource_type,
         resource_id=resource_id,

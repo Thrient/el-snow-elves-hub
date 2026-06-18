@@ -15,7 +15,7 @@ instance.interceptors.response.use(
 
     if (status === 401) {
       // login/register 的 401 是正常错误（密码错等），不触发登出
-      const authUrls = ["/api/v1/auth/login", "/api/v1/auth/register"];
+      const authUrls = ["/api/v1/auth/login", "/api/v1/auth/register", "/api/v1/auth/logout", "/api/v1/auth/me"];
       if (authUrls.includes(err.config?.url || "")) {
         bus.emit("app:error", msg);
         return Promise.reject(err);

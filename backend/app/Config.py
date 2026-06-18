@@ -51,6 +51,13 @@ class Settings(BaseSettings):
     rate_limit_default: str = "60/minute"
     rate_limit_auth: str = "5/minute"
     rate_limit_upload: str = "10/minute"
+    # Ollama (本地文字审核)
+    ollama_url: str = "http://ollama:8080/v1/chat/completions"
+    ollama_model: str = "Qwen3.6-35B-A3B-Uncensored-HauhauCS-Aggressive-Q4_K_M.gguf"
+
+    # AI Vision
+    ai_api_url: str = "http://ollama:8080/v1/chat/completions"
+    ai_model: str = "Qwen3.6-35B-A3B-Uncensored-HauhauCS-Aggressive-Q4_K_M.gguf"
 
 
 settings = Settings()

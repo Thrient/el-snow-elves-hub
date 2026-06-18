@@ -17,10 +17,11 @@ from app.task.entity.Comment import Comment
 from app.identity.entity.User import User
 from app.review.entity.ReviewRecord import ReviewRecord
 from app.notification.Router import create_notification
+from app.Config import settings
 
 AI_EMAIL = "ai-reviewer@elarion.cn"
-LLAMA_URL = "http://ollama:8080/v1/chat/completions"
-LLAMA_MODEL = "qwen"
+LLAMA_URL = settings.ollama_url
+LLAMA_MODEL = settings.ollama_model
 
 REVIEW_PROMPT = """检查以下内容是否包含明确的违规：
 - 人身攻击/辱骂（含拼音缩写 sb/cnm/nmsl 等）
