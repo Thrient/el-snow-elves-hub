@@ -41,14 +41,18 @@ async def ai_vision(
     ]
 
     body = {
-        "model": settings.ai_model,
+        "model": settings.ollama_model,
         "messages": messages,
         "stream": False,
-        "max_tokens": 4096,
-        "temperature": 0,
+        "chat_template_kwargs": {"enable_thinking": False},
+        "backend_sampling": False,
+        "reasoning_control": True,
+        "reasoning_format": "auto",
+        "return_progress": True,
+        "timings_per_token": True,
     }
 
-    resp = await call_external("POST", settings.ai_api_url, json=body)
+    resp = await call_external("POST", settings.ollama_url, json=body)
     reply = resp.json()["choices"][0]["message"]["content"]
     await log_audit(user, "AI视觉分析", "ai", None, prompt[:200], "")
     return ok({"reply": reply})

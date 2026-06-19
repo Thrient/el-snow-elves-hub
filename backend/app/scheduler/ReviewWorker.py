@@ -190,6 +190,18 @@ async def _handle_message(data: dict):
     item_id = data["id"]
     ai_user_id = await _get_ai_user_id()
 
+    # 防重复：已有审核记录的直接跳过
+    async with async_session() as db:
+        existing = (await db.execute(
+            select(ReviewRecord).where(
+                ReviewRecord.content_type == type_,
+                ReviewRecord.content_id == item_id,
+            )
+        )).scalar_one_or_none()
+        if existing:
+            print(f"AI review skipped (already reviewed): {type_} #{item_id}")
+            return
+
     if type_ in ("post", "reply"):
         async with async_session() as db:
             p = (await db.execute(
@@ -345,25 +357,53 @@ async def _handle_message(data: dict):
 
 
 async def _catch_up_unreviewed():
-    """一次性扫描：把已发布但未审核的内容重新入队"""
+    """一次性扫描：已发布但未审核的内容重新入队（跳过已有审核记录的内容）"""
     async with async_session() as db:
+        # 获取所有已审核的内容 ID
+        reviewed_posts = set()
+        reviewed_tasks = set()
+        reviewed_comments = set()
+        records = (await db.execute(select(ReviewRecord))).scalars().all()
+        for r in records:
+            if r.content_type in ("post", "reply"):
+                reviewed_posts.add(r.content_id)
+            elif r.content_type == "task":
+                reviewed_tasks.add(r.content_id)
+            elif r.content_type == "comment":
+                reviewed_comments.add(r.content_id)
+
         posts = (await db.execute(
             select(ForumPost).where(ForumPost.status == "published")
         )).scalars().all()
+        new_posts = 0
         for p in posts:
+            if p.id in reviewed_posts:
+                continue
             kind = "post" if p.thread_id is None else "reply"
             await publish_review(kind, p.id)
+            new_posts += 1
+
         tasks = (await db.execute(
             select(TaskModel).where(TaskModel.status == "published")
         )).scalars().all()
+        new_tasks = 0
         for t in tasks:
+            if t.id in reviewed_tasks:
+                continue
             await publish_review("task", t.id)
+            new_tasks += 1
+
         comments = (await db.execute(
             select(Comment).where(Comment.status == "published")
         )).scalars().all()
+        new_comments = 0
         for c in comments:
+            if c.id in reviewed_comments:
+                continue
             await publish_review("comment", c.id)
-    print(f"AI review catch-up: {len(posts)} posts, {len(tasks)} tasks, {len(comments)} comments")
+            new_comments += 1
+
+    print(f"AI review catch-up: {new_posts}/{len(posts)} posts, {new_tasks}/{len(tasks)} tasks, {new_comments}/{len(comments)} comments")
 
 
 async def start_worker():

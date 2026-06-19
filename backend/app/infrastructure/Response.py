@@ -1,10 +1,22 @@
 """统一 API 响应格式"""
 
+import logging
+
 from fastapi.responses import JSONResponse
 from fastapi import Request
 from starlette.exceptions import HTTPException
 from pydantic import BaseModel
 import httpx
+
+_log = logging.getLogger("el-snow-hub.Response")
+_client: httpx.AsyncClient | None = None
+
+
+def _get_client() -> httpx.AsyncClient:
+    global _client
+    if _client is None:
+        _client = httpx.AsyncClient(timeout=120)
+    return _client
 
 
 class BusinessException(Exception):
@@ -29,13 +41,12 @@ def fail(code: int = -1, message: str = "error", data=None) -> dict:
     return {"code": code, "message": message, "data": data}
 
 
-async def call_external(method: str, url: str, *, json=None, headers=None, timeout=120) -> httpx.Response:
+async def call_external(method: str, url: str, *, json=None, headers=None) -> httpx.Response:
     """调用外部 API，所有异常统一转为 BusinessException(502)"""
     try:
-        async with httpx.AsyncClient(timeout=timeout) as cli:
-            resp = await cli.request(method, url, json=json, headers=headers)
-            resp.raise_for_status()
-            return resp
+        resp = await _get_client().request(method, url, json=json, headers=headers)
+        resp.raise_for_status()
+        return resp
     except BusinessException:
         raise
     except httpx.HTTPStatusError as e:
@@ -60,7 +71,8 @@ async def business_exception_handler(request: Request, exc: BusinessException):
 
 
 async def general_exception_handler(request: Request, exc: Exception):
+    _log.exception("未处理的异常")
     return JSONResponse(
         status_code=500,
-        content=fail(500, f"服务器内部错误: {str(exc)[:200]}"),
+        content=fail(500, "服务器内部错误"),
     )

@@ -6,7 +6,7 @@ from urllib.parse import quote
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, Form
 from fastapi.responses import StreamingResponse
-from sqlalchemy import select, func, and_, or_, desc
+from sqlalchemy import select, func, and_, or_, desc, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.infrastructure.Database import get_db
@@ -130,9 +130,9 @@ async def rankings(
 ):
     q = select(Task).where(Task.status == "published")
     if period == "week":
-        q = q.where(Task.created_at >= func.now() - 7 * 86400)
+        q = q.where(Task.created_at >= func.date_sub(func.now(), text("INTERVAL 7 DAY")))
     elif period == "month":
-        q = q.where(Task.created_at >= func.now() - 30 * 86400)
+        q = q.where(Task.created_at >= func.date_sub(func.now(), text("INTERVAL 30 DAY")))
     result = await db.execute(q.order_by(desc(Task.download_count)).limit(20))
     tasks = [await _to_task(t, None, db) for t in result.scalars().all()]
     return ok(tasks)

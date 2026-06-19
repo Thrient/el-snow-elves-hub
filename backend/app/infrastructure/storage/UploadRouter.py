@@ -83,7 +83,7 @@ async def complete_upload(
     finally:
         await r.aclose()
     fp_id = result["fingerprint_id"]
-    await log_audit(None, "upload", "file", fp_id, "chunked upload", "")
+    await log_audit(user, "upload", "file", fp_id, "chunked upload", "")
     return ok({"fingerprint_id": fp_id})
 
 
@@ -106,5 +106,5 @@ async def direct_upload(
     finally:
         await r.aclose()
     fp_id = result["fingerprint_id"]
-    await log_audit(None, "upload", "file", fp_id, "direct: " + (file.filename or "untitled"), "")
+    await log_audit(user, "upload", "file", fp_id, "direct: " + (file.filename or "untitled"), "")
     return ok({"fingerprint_id": fp_id})
