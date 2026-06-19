@@ -51,9 +51,10 @@ class Settings(BaseSettings):
     rate_limit_default: str = "60/minute"
     rate_limit_auth: str = "5/minute"
     rate_limit_upload: str = "10/minute"
-    # Ollama（AI 视觉 + 文字审核共用）
-    ollama_url: str = "http://ollama:8080/v1/chat/completions"
-    ollama_model: str = "Qwen3.6-35B-A3B-Uncensored-HauhauCS-Aggressive-Q4_K_M.gguf"
+    # DashScope (通义千问)
+    dashscope_api_key: str = ""
+    dashscope_base_url: str = "https://dashscope.aliyuncs.com/compatible-mode/v1"
+    dashscope_model: str = "qwen3.7-plus"
 
 
 settings = Settings()

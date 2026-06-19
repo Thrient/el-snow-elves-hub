@@ -5,6 +5,7 @@ import json
 import re
 
 import httpx
+from openai import AsyncOpenAI
 from sqlalchemy import select
 
 from app.infrastructure.Database import async_session
@@ -20,8 +21,18 @@ from app.notification.Router import create_notification
 from app.Config import settings
 
 AI_EMAIL = "ai-reviewer@elarion.cn"
-LLAMA_URL = settings.ollama_url
-LLAMA_MODEL = settings.ollama_model
+
+_ai_client: AsyncOpenAI | None = None
+
+
+def _get_ai_client() -> AsyncOpenAI:
+    global _ai_client
+    if _ai_client is None:
+        _ai_client = AsyncOpenAI(
+            api_key=settings.dashscope_api_key,
+            base_url=settings.dashscope_base_url,
+        )
+    return _ai_client
 
 REVIEW_PROMPT = """检查以下内容是否包含明确的违规：
 - 人身攻击/辱骂（含拼音缩写 sb/cnm/nmsl 等）
@@ -117,27 +128,22 @@ async def ai_review_text(text: str, image_urls: list[str] | None = None) -> dict
     last_error = None
     for attempt in range(3):
         try:
-            body = {
-                "model": LLAMA_MODEL, "messages": messages,
-                "stream": False, "max_tokens": 32768,
-            }
-            async with httpx.AsyncClient(timeout=120) as cli:
-                resp = await cli.post(LLAMA_URL, json=body)
-                data = resp.json()
-                msg = data["choices"][0]["message"]
-                raw = msg.get("content") or msg.get("reasoning_content") or ""
-                result = _extract_json(raw)
-                if result is None:
-                    raise ValueError(f"无法解析 JSON: {raw[:200]}")
-                action = result.get("action", "pass")
-                reason = result.get("reason", "")
-                if action not in ("pass", "pending", "reject"):
-                    action = "pending"
-                if not reason:
-                    reason = "内容正常" if action == "pass" else "无法确定" if action == "pending" else "违规内容"
-                return {"action": action, "reason": reason}
-        except (httpx.TimeoutException, httpx.ConnectError, httpx.RemoteProtocolError):
-            last_error = "network error"
+            completion = await _get_ai_client().chat.completions.create(
+                model=settings.dashscope_model,
+                messages=messages,
+                max_tokens=32768,
+            )
+            raw = completion.choices[0].message.content or ""
+            result = _extract_json(raw)
+            if result is None:
+                raise ValueError(f"无法解析 JSON: {raw[:200]}")
+            action = result.get("action", "pass")
+            reason = result.get("reason", "")
+            if action not in ("pass", "pending", "reject"):
+                action = "pending"
+            if not reason:
+                reason = "内容正常" if action == "pass" else "无法确定" if action == "pending" else "违规内容"
+            return {"action": action, "reason": reason}
         except Exception as e:
             last_error = str(e)[:200]
         if attempt < 2:
