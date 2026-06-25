@@ -1,5 +1,5 @@
 import type { FC } from "react";
-import { Button, Typography, Dropdown } from "antd";
+import { Button, Typography, Dropdown, Image } from "antd";
 import {
   UserOutlined, ClockCircleOutlined, EyeOutlined, MessageOutlined,
   PushpinOutlined, LockOutlined, MoreOutlined, EditOutlined, DeleteOutlined,
@@ -95,7 +95,7 @@ const PostDetail: FC<Props> = ({ thread, liked, canManage, isAuthor, onLike, onE
         <div className="grid gap-2.5 mt-5" style={{ gridTemplateColumns: `repeat(${Math.min(thread.image_urls.length, 3)}, 1fr)` }}>
           {thread.image_urls.map((url, i) => (
             <div key={i} className="rounded-2.5 overflow-hidden aspect-16/10 bg-[#f3f0ec] cursor-zoom-in">
-              <img src={url} alt="" loading="lazy" className="w-full h-full object-cover" />
+              <Image src={url} alt="" loading="lazy" className="w-full h-full object-cover" preview={{ mask: "点击预览" }} />
             </div>
           ))}
         </div>

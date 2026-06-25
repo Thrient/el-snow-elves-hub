@@ -1,5 +1,5 @@
 import type { FC } from "react";
-import { Button, Tag } from "antd";
+import { Button, Tag, Image } from "antd";
 import { UserOutlined, HeartOutlined, HeartFilled, MessageOutlined, EditOutlined, DeleteOutlined } from "@ant-design/icons";
 import type { ReplyItem, ThreadDetail } from "@/types";
 import { timeAgo } from "@/util/time";
@@ -70,7 +70,7 @@ const ReplyCard: FC<Props> = ({ reply: r, floorNum, thread, userId, liked, canMa
           <div className="grid gap-2" style={{ gridTemplateColumns: `repeat(${Math.min(r.image_urls.length, 3)}, 1fr)` }}>
             {r.image_urls.map((url, i) => (
               <div key={i} className="rounded-2 overflow-hidden aspect-16/10 bg-[#f3f0ec]">
-                <img src={url} alt="" loading="lazy" className="w-full h-full object-cover" />
+                <Image src={url} alt="" loading="lazy" className="w-full h-full object-cover" preview={{ mask: "点击预览" }} />
               </div>
             ))}
           </div>

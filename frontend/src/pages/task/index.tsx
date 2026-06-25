@@ -1,6 +1,6 @@
 import { useEffect, useState, useCallback, useRef, type FC } from "react";
-import { useNavigate } from "react-router-dom";
-import { Input, Select, Row, Col, Typography, Button, Skeleton } from "antd";
+import { useNavigate, useSearchParams } from "react-router-dom";
+import { Input, Select, Row, Col, Typography, Button, Skeleton, Pagination } from "antd";
 import { SearchOutlined, PlusOutlined, FireOutlined, AppstoreOutlined } from "@ant-design/icons";
 import { taskApi } from "@/api/task";
 import type { TaskItem, PageResult } from "@/types";
@@ -18,6 +18,16 @@ const MarketPage: FC = () => {
   const [search, setSearch] = useState("");
   const [category, setCategory] = useState("");
   const [sort, setSort] = useState("latest");
+  const [searchParams, setSearchParams] = useSearchParams();
+  const page = Number(searchParams.get("page")) || 1;
+  const size = Number(searchParams.get("size")) || 20;
+
+  const setPage = (p: number, s?: number) => setSearchParams((prev) => {
+    const n = new URLSearchParams(prev);
+    n.set("page", String(p));
+    if (s !== undefined) n.set("size", String(s));
+    return n;
+  });
 
   const searchRef = useRef(search);
   searchRef.current = search;
@@ -26,15 +36,15 @@ const MarketPage: FC = () => {
     setLoading(true);
     try {
       const q = searchText ?? searchRef.current;
-      const r = await taskApi.list({ search: q, category: category === "全部" ? "" : category, sort });
+      const r = await taskApi.list({ search: q, category: category === "全部" ? "" : category, sort, page, size });
       setData(r);
     } catch { /* ignore */ }
     finally { setLoading(false); }
-  }, [category, sort]);
+  }, [category, sort, page, size]);
 
   useEffect(() => { load(); }, [load]);
 
-  const doSearch = () => load(search);
+  const doSearch = () => { setPage(1); load(search); };
 
   return (
     <div className="pt-8">
@@ -86,10 +96,10 @@ const MarketPage: FC = () => {
           allowClear
           size="middle"
         />
-        <Select value={category || "全部"} onChange={setCategory} className="w-22.5">
+        <Select value={category || "全部"} onChange={(v) => { setCategory(v); setPage(1); }} className="w-22.5">
           {CATEGORIES.map((c) => <Select.Option key={c} value={c}>{c}</Select.Option>)}
         </Select>
-        <Select value={sort} onChange={setSort} className="w-27.5">
+        <Select value={sort} onChange={(v) => { setSort(v); setPage(1); }} className="w-27.5">
           <Select.Option value="latest">最新发布</Select.Option>
           <Select.Option value="downloads">下载最多</Select.Option>
           <Select.Option value="likes">点赞最多</Select.Option>
@@ -139,6 +149,19 @@ const MarketPage: FC = () => {
             </Col>
           ))}
         </Row>
+      )}
+      {data && data.pages > 1 && (
+        <div className="flex justify-center mt-6 pb-6">
+          <Pagination
+            current={page}
+            pageSize={size}
+            total={data.total}
+            onChange={(p, s) => { setPage(p, s); window.scrollTo({ top: 0, behavior: "smooth" }); }}
+            showSizeChanger
+            pageSizeOptions={["20", "40", "60"]}
+            showTotal={(total) => `共 ${total} 个任务`}
+          />
+        </div>
       )}
     </div>
   );
