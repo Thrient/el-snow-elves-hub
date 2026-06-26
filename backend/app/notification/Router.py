@@ -1,11 +1,8 @@
 """通知 — 列表 / 未读数 / 标记已读 / SSE 实时推送 / 内部发送"""
-import asyncio
-import json
 import math
 from datetime import datetime, timezone
 
-from fastapi import APIRouter, Depends, HTTPException, Query, Request
-from fastapi.responses import StreamingResponse
+from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy import select, func, desc, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -15,37 +12,11 @@ from el_token.ElLogic import ElLogic
 from el_token.ElToken import ElToken
 from el_token.ElSettings import ElSettings
 from app.infrastructure.Response import ok
+from app.infrastructure.sse.PresenceTracker import push as presence_push
 from app.notification.entity.Notification import Notification
 from app.identity.entity.User import User
 
 router = APIRouter(prefix="/notifications", tags=["通知"])
-
-# ── 内存事件总线 ──
-_streams: dict[int, list[asyncio.Queue]] = {}
-_lock = asyncio.Lock()
-
-
-async def _subscribe(user_id: int) -> asyncio.Queue:
-    q: asyncio.Queue = asyncio.Queue()
-    async with _lock:
-        _streams.setdefault(user_id, []).append(q)
-    return q
-
-
-async def _unsubscribe(user_id: int, q: asyncio.Queue):
-    async with _lock:
-        if user_id in _streams:
-            _streams[user_id] = [x for x in _streams[user_id] if x is not q]
-            if not _streams[user_id]:
-                del _streams[user_id]
-
-
-async def _publish(user_id: int, data: dict):
-    async with _lock:
-        queues = _streams.get(user_id, [])
-    for q in queues:
-        await q.put(data)
-
 
 async def create_notification(
     db: AsyncSession, receiver_id: int, sender_id: int | None,
@@ -59,55 +30,11 @@ async def create_notification(
     )
     db.add(n)
     await db.flush()
-    await _publish(receiver_id, {
+    await presence_push({
         "id": n.id, "type": n.type, "content": n.content, "link": n.link,
         "sender_name": None, "is_read": False, "created_at": now.isoformat(),
-    })
+    }, user_id=receiver_id)
 
-# ── SSE ──
-
-async def _sse_generator(user_id: int):
-    q = await _subscribe(user_id)
-    try:
-        while True:
-            try:
-                data = await asyncio.wait_for(q.get(), timeout=30.0)
-                yield f"data: {json.dumps(data, ensure_ascii=False)}\n\n"
-            except asyncio.TimeoutError:
-                yield ": heartbeat\n\n"
-    except asyncio.CancelledError:
-        pass
-    finally:
-        await _unsubscribe(user_id, q)
-
-
-@router.get("/stream")
-async def notification_stream(request: Request, db: AsyncSession = Depends(get_db)):
-    from app.infrastructure.sse.OnlineTracker import connect as online_connect, disconnect as online_disconnect
-
-    uid = ElLogic.get_login_id()
-    if not uid:
-        raise HTTPException(401, "未登录")
-    user_id = int(uid)
-
-    web_client_id, _ = await online_connect("web")
-
-    async def tracked_generator():
-        try:
-            async for chunk in _sse_generator(user_id):
-                yield chunk
-        finally:
-            await online_disconnect("web", web_client_id)
-
-    return StreamingResponse(
-        tracked_generator(),
-        media_type="text/event-stream",
-        headers={
-            "Cache-Control": "no-cache",
-            "Connection": "keep-alive",
-            "X-Accel-Buffering": "no",
-        },
-    )
 
 # ── REST ──
 

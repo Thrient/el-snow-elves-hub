@@ -16,16 +16,16 @@ const NotificationBell: FC = () => {
 
   // SSE 实时推送
   useEffect(() => {
-    if (!user) { setUnreadCount(0); return; }
-
     notificationApi.unreadCount().then(setUnreadCount);
-    const es = new EventSource("/api/v1/notifications/stream");
+    const es = new EventSource("/api/v1/stream?client=web");
     es.onmessage = (e) => {
       try {
-        const n = JSON.parse(e.data);
-        if (n.id) {
+        const d = JSON.parse(e.data);
+        if (d.type === "online_count") {
+          useAuthStore.getState().setOnlineCount(d.desktop, d.web);
+        } else if (d.id) {
           setUnreadCount((c) => c + 1);
-          setRecentNotifs((prev) => [n, ...prev].slice(0, 5));
+          setRecentNotifs((prev) => [d, ...prev].slice(0, 5));
         }
       } catch {}
     };

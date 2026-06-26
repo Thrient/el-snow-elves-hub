@@ -87,7 +87,7 @@ async def seed():
                      "task:list", "task:rankings", "task:user", "task:view", "task:comments", "task:download",
                      "route:list",
                      "version:list", "version:download", "version:diff", "version:blob",
-                     "public:ping", "client:stream"]
+                     "public:ping", "presence:stream"]
         for code in anon_perms:
             p = (await db.execute(select(Permission).where(Permission.code == code))).scalar_one()
             existing = (await db.execute(

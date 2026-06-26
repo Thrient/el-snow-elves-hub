@@ -11,8 +11,6 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.infrastructure.Database import async_session, get_db
 from app.api.Deps import require_perm_any
 from app.infrastructure.Response import ok
-from app.infrastructure.sse.OnlineTracker import connect as online_connect, disconnect as online_disconnect
-from app.infrastructure.sse.SseConnection import SseConnection
 from app.release.entity.DownloadVersion import DownloadVersion
 from app.release.entity.VersionFile import VersionFile
 from app.infrastructure.storage.entity.Fingerprint import Fingerprint
@@ -199,13 +197,3 @@ async def download_version_zip(
             },
         )
 
-# ═══════════════════════════════════════════
-# SSE 桌面客户端长连接
-# ═══════════════════════════════════════════
-
-@router.get("/client/stream",
-            dependencies=[Depends(require_perm_any("client:stream"))])
-async def client_stream():
-    client_id, q = await online_connect("desktop")
-    conn = SseConnection(q, on_disconnect=lambda: online_disconnect("desktop", client_id))
-    return conn.stream()

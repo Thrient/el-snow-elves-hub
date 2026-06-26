@@ -2,27 +2,16 @@ import { useEffect, useState, type FC } from "react";
 import { Card, Row, Col, Statistic } from "antd";
 import { UserOutlined, DownloadOutlined, DesktopOutlined, GlobalOutlined } from "@ant-design/icons";
 import { adminApi } from "@/api/admin";
+import { useAuthStore } from "@/store/auth";
 import type { AdminStats } from "@/types";
 
 const DashboardPage: FC = () => {
   const [stats, setStats] = useState<AdminStats | null>(null);
+  const desktopOnline = useAuthStore((s) => s.desktop_online);
+  const webOnline = useAuthStore((s) => s.web_online);
 
   useEffect(() => {
     adminApi.getStats().then(setStats).catch(() => {});
-  }, []);
-
-  useEffect(() => {
-    const es = new EventSource("/api/v1/admin/stream");
-    es.onmessage = (e) => {
-      try {
-        const d = JSON.parse(e.data);
-        if (d.type === "online_count") {
-          setStats((prev) => prev ? { ...prev, desktop_online: d.desktop, web_online: d.web } : prev);
-        }
-      } catch { /* ignore */ }
-    };
-    es.onerror = () => {};
-    return () => es.close();
   }, []);
 
   return (
@@ -45,14 +34,14 @@ const DashboardPage: FC = () => {
         </Col>
         <Col xs={24} sm={12}>
           <Card hoverable className="rounded-3">
-            <Statistic title="桌面在线" value={stats?.desktop_online ?? "-"}
+            <Statistic title="桌面在线" value={desktopOnline}
               prefix={<DesktopOutlined />}
               styles={{ value: { color: "#1677ff" } }} />
           </Card>
         </Col>
         <Col xs={24} sm={12}>
           <Card hoverable className="rounded-3">
-            <Statistic title="网页在线" value={stats?.web_online ?? "-"}
+            <Statistic title="网页在线" value={webOnline}
               prefix={<GlobalOutlined />}
               styles={{ value: { color: "#52c41a" } }} />
           </Card>

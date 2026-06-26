@@ -14,17 +14,22 @@ export interface AuthUser {
 interface AuthState {
   user: AuthUser | null;
   loading: boolean;
+  desktop_online: number;
+  web_online: number;
 
   login: (email: string, password: string) => Promise<void>;
   register: (username: string, email: string, password: string) => Promise<void>;
   logout: () => Promise<void>;
   validateSession: () => Promise<void>;
   hasPerm: (code: string) => boolean;
+  setOnlineCount: (desktop: number, web: number) => void;
 }
 
 export const useAuthStore = create<AuthState>((set, get) => ({
   user: null,
   loading: false,
+  desktop_online: 0,
+  web_online: 0,
 
   login: async (email, password) => {
     set({ loading: true });
@@ -71,4 +76,6 @@ export const useAuthStore = create<AuthState>((set, get) => ({
     if (user.permissions.includes("*")) return true;
     return user.permissions.includes(code);
   },
+
+  setOnlineCount: (desktop: number, web: number) => set({ desktop_online: desktop, web_online: web }),
 }));

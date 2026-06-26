@@ -30,6 +30,7 @@ from app.audit.entity.AuditLog import AuditLog
 from app.audit.Schema.AuditLogOut import AuditLogOut
 from app.audit.service import log_audit
 from app.admin.Schema.StatsResponse import StatsResponse
+from app.infrastructure.sse.PresenceTracker import counts as presence_counts
 from app.admin.Schema.UserItem import UserItem, UserRoleUpdate
 from app.admin.Schema.VersionCreate import VersionCreate
 from app.admin.Schema.RbacSchema import PermCreate, PermUpdate, RoleCreate, RoleUpdate
@@ -47,7 +48,7 @@ router = APIRouter(prefix="/admin", tags=["管理后台"])
 async def get_stats(db: AsyncSession = Depends(get_db)):
     user_count = (await db.execute(select(func.count(User.id)))).scalar() or 0
     version_count = (await db.execute(select(func.count(DownloadVersion.id)))).scalar() or 0
-    online = counts()
+    online = await presence_counts()
     return StatsResponse(
         user_count=user_count, version_count=version_count,
         desktop_online=online.get("desktop", 0), web_online=online.get("web", 0),
@@ -446,45 +447,3 @@ async def list_audit_logs(
         "pages": max(1, (total + size - 1) // size),
     })
 
-
-# ═══════════════════════════════════════════
-# SSE 实时在线数
-# ═══════════════════════════════════════════
-
-import asyncio
-import json
-
-from fastapi import Request as FastAPIRequest
-from app.infrastructure.sse.OnlineTracker import admin_queues_list, counts, _lock as tracker_lock
-from app.infrastructure.sse.SseConnection import SseConnection
-from el_token.ElLogic import ElLogic
-
-
-async def get_admin_user(
-    request: FastAPIRequest,
-    db_admin: AsyncSession = Depends(get_db),
-) -> User:
-    uid = ElLogic.get_login_id()
-    if not uid:
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="需要登录")
-
-    user = (await db_admin.execute(
-        select(User).where(User.id == int(uid))
-    )).scalar_one_or_none()
-    if not user:
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="用户不存在")
-
-    return user
-
-
-@router.get("/stream")
-async def admin_stream(user: User = Depends(get_admin_user)):
-    queue: asyncio.Queue = asyncio.Queue()
-    admin_queues_list().append(queue)
-
-    async with tracker_lock:
-        initial = json.dumps({"type": "online_count", **counts()})
-    await queue.put(initial)
-
-    conn = SseConnection(queue, on_disconnect=lambda: admin_queues_list().remove(queue))
-    return conn.stream()

@@ -26,7 +26,7 @@ PERMISSION_CODES: dict[str, str] = {
     "page:admin-routes": "查看路由管理",
     "dashboard:view": "查看仪表盘数据",
     "public:ping": "健康检查",
-    "client:stream": "客户端推送",
+    "presence:stream": "在线状态推送",
     "auth:login": "登录",
     "auth:register": "注册",
     "auth:verify": "验证邮箱链接",

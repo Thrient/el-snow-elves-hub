@@ -11,6 +11,7 @@ from app.infrastructure.storage.Router import router as files_router
 from app.infrastructure.storage.UploadRouter import router as uploads_router
 from app.infrastructure.navigation.Router import router as navigation_router
 from app.ai.Router import router as ai_router
+from app.infrastructure.sse.Router import router as sse_router
 
 router = APIRouter()
 
@@ -24,3 +25,4 @@ router.include_router(uploads_router)
 router.include_router(files_router)
 router.include_router(navigation_router)
 router.include_router(ai_router)
+router.include_router(sse_router)

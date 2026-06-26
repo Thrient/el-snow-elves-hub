@@ -50,9 +50,9 @@ const AppHeader: FC = () => {
       />
 
       <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+        <NotificationBell />
         {user ? (
           <>
-            <NotificationBell />
             <span
               style={{ fontSize: 13, color: "#6b5e55", fontWeight: 500, cursor: "pointer" }}
               onClick={() => navigate("/profile")}

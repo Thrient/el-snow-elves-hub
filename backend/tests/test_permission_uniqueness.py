@@ -13,7 +13,6 @@ API_PERMS: set[str] = {
     "public:ping", "route:list",
     # release
     "version:list", "version:diff", "version:blob", "version:download",
-    "client:stream",
     # admin
     "dashboard:view",
     "user:list", "user:assign", "user:disable", "user:delete",
