@@ -174,6 +174,7 @@ const MarketPage: FC = () => {
         </Select>
         <Select value={sort} onChange={(v) => { setSort(v); setPage(1); }} className="w-27.5">
           <Select.Option value="latest">最新发布</Select.Option>
+          <Select.Option value="updated">最近更新</Select.Option>
           <Select.Option value="downloads">下载最多</Select.Option>
           <Select.Option value="likes">点赞最多</Select.Option>
         </Select>

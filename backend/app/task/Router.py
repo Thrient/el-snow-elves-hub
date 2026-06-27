@@ -115,6 +115,13 @@ async def list_tasks(
         case "downloads": q = q.order_by(desc(Task.download_count))
         case "likes":     q = q.order_by(desc(Task.like_count))
         case "comments":  q = q.order_by(desc(Task.comment_count))
+        case "updated":
+            latest_ver = (
+                select(func.max(TaskVersion.created_at))
+                .where(TaskVersion.task_id == Task.id)
+                .scalar_subquery()
+            )
+            q = q.order_by(desc(func.coalesce(latest_ver, Task.created_at)))
         case _:           q = q.order_by(desc(Task.created_at))
 
     total = (await db.execute(select(func.count()).select_from(q.subquery()))).scalar() or 0
