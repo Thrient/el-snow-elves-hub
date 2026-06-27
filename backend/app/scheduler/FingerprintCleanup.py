@@ -6,10 +6,11 @@ from sqlalchemy import select, delete, func
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.infrastructure.storage.entity.Fingerprint import Fingerprint
-from app.infrastructure.storage.entity.FileRecord import FileRecord
+from app.infrastructure.storage.entity.FileMeta import FileMeta
 from app.infrastructure.storage.entity.OrphanTracker import OrphanTracker
 from app.identity.entity.User import User
 from app.task.entity.Task import Task as TaskModel
+from app.task.entity.TaskVersion import TaskVersion
 from app.release.entity.VersionFile import VersionFile
 from app.forum.entity.ForumPost import ForumPost
 from app.infrastructure.storage.MinioClient import client as minio
@@ -21,16 +22,16 @@ async def reconcile_and_cleanup(db: AsyncSession, retention_days: int = 7) -> in
     # ── 1. 收集所有 FileRecord id（所有业务域都通过它引用文件） ──
     record_ids: set[int] = set()
 
-    rows = (await db.execute(select(User.avatar_record_id).where(User.avatar_record_id.isnot(None)))).all()
+    rows = (await db.execute(select(User.avatar_meta_id).where(User.avatar_meta_id.isnot(None)))).all()
     record_ids.update(r[0] for r in rows)
 
-    rows = (await db.execute(select(TaskModel.file_record_id).where(TaskModel.file_record_id.isnot(None)))).all()
+    rows = (await db.execute(select(TaskVersion.file_meta_id).where(TaskVersion.file_meta_id.isnot(None)))).all()
     record_ids.update(r[0] for r in rows)
 
-    rows = (await db.execute(select(TaskModel.cover_record_id).where(TaskModel.cover_record_id.isnot(None)))).all()
+    rows = (await db.execute(select(TaskModel.cover_meta_id).where(TaskModel.cover_meta_id.isnot(None)))).all()
     record_ids.update(r[0] for r in rows)
 
-    rows = (await db.execute(select(VersionFile.file_record_id))).all()
+    rows = (await db.execute(select(VersionFile.file_meta_id))).all()
     record_ids.update(r[0] for r in rows)
 
     # forum_posts.image_ids — JSON 数组
@@ -48,7 +49,7 @@ async def reconcile_and_cleanup(db: AsyncSession, retention_days: int = 7) -> in
     refs: Counter[int] = Counter()
     if record_ids:
         rows = (await db.execute(
-            select(FileRecord.fingerprint_id).where(FileRecord.id.in_(record_ids))
+            select(FileMeta.fingerprint_id).where(FileMeta.id.in_(record_ids))
         )).all()
         refs.update(r[0] for r in rows)
 

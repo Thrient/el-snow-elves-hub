@@ -1,4 +1,4 @@
-"""文件存储服务 — SHA256 去重 + 文件记录"""
+"""文件存储服务 — SHA256 去重 + 元数据记录"""
 from __future__ import annotations
 import hashlib
 
@@ -6,12 +6,12 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.infrastructure.storage.entity.Fingerprint import Fingerprint
-from app.infrastructure.storage.entity.FileRecord import FileRecord
+from app.infrastructure.storage.entity.FileMeta import FileMeta
 from app.infrastructure.storage.MinioClient import client as minio
 
 
 class StorageService:
-    """文件存储：去重上传 + 记录留存 + 下载链接生成"""
+    """文件存储：去重上传 + 元数据记录 + 下载链接生成"""
 
     @staticmethod
     async def store(
@@ -35,41 +35,21 @@ class StorageService:
         return fp
 
     @staticmethod
-    async def create_record(
-        db: AsyncSession,
-        fp: Fingerprint,
-        filename: str,
-        uploaded_by: int | None = None,
-    ) -> FileRecord:
-        """创建文件上传记录。先调 store() 拿指纹，再调此函数记录上传行为。"""
-        record = FileRecord(
-            fingerprint_id=fp.id,
-            filename=filename,
-            size=fp.size,
-            uploaded_by=uploaded_by,
-        )
-        db.add(record)
-        await db.flush()
-        return record
-
-    @staticmethod
-    async def create_record_from_fingerprint(
+    async def create_meta(
         db: AsyncSession,
         fingerprint_id: int,
         filename: str,
-        uploaded_by: int,
-    ) -> FileRecord:
-        """Create FileRecord from a fingerprint_id. Called by business APIs."""
+    ) -> FileMeta:
+        """从 fingerprint_id 创建 FileMeta。调用方必须传入真实文件名。"""
         fp = (await db.execute(
             select(Fingerprint).where(Fingerprint.id == fingerprint_id)
         )).scalar_one_or_none()
         if not fp:
             raise ValueError(f"指纹不存在: {fingerprint_id}")
-        record = FileRecord(
+        record = FileMeta(
             fingerprint_id=fp.id,
             filename=filename,
             size=fp.size,
-            uploaded_by=uploaded_by,
         )
         db.add(record)
         await db.flush()

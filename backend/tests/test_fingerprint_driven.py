@@ -1,7 +1,7 @@
 """
 Tests for fingerprint-driven architecture:
 - /files/check returns fingerprint_id (not record_id)
-- StorageService.create_record_from_fingerprint creates FileRecord from fingerprint_id
+- StorageService.create_meta creates FileMeta from fingerprint_id
 """
 import sys
 import pytest
@@ -98,8 +98,8 @@ async def test_check_single_not_found():
 
 
 @pytest.mark.asyncio
-async def test_create_record_from_fingerprint(_mock_minio):
-    """StorageService.create_record_from_fingerprint creates FileRecord from fingerprint_id"""
+async def test_create_meta(_mock_minio):
+    """StorageService.create_meta creates FileMeta from fingerprint_id"""
     from unittest.mock import patch as local_patch
     from app.infrastructure.storage.StorageService import storage_service
 
@@ -112,28 +112,26 @@ async def test_create_record_from_fingerprint(_mock_minio):
     fp_check.scalar_one_or_none.return_value = fp
     db.execute = AsyncMock(return_value=fp_check)
 
-    # Mock FileRecord to avoid SQLAlchemy mapper config issues in test
+    # Mock FileMeta to avoid SQLAlchemy mapper config issues in test
     mock_record = MagicMock()
     mock_record.fingerprint_id = 42
     mock_record.filename = "test.zip"
     mock_record.size = 1024
-    mock_record.uploaded_by = 1
-    with local_patch("app.infrastructure.storage.StorageService.FileRecord",
+    with local_patch("app.infrastructure.storage.StorageService.FileMeta",
                      return_value=mock_record):
-        record = await storage_service.create_record_from_fingerprint(
-            db, fingerprint_id=42, filename="test.zip", uploaded_by=1,
+        record = await storage_service.create_meta(
+            db, fingerprint_id=42, filename="test.zip",
         )
 
     assert record.fingerprint_id == 42
     assert record.filename == "test.zip"
     assert record.size == 1024
-    assert record.uploaded_by == 1
     db.add.assert_called_once()
     db.flush.assert_called()
 
 
 @pytest.mark.asyncio
-async def test_create_record_from_fingerprint_not_found(_mock_minio):
+async def test_create_meta_not_found(_mock_minio):
     """Raises ValueError when fingerprint_id does not exist"""
     from app.infrastructure.storage.StorageService import storage_service
 
@@ -143,6 +141,6 @@ async def test_create_record_from_fingerprint_not_found(_mock_minio):
     db.execute = AsyncMock(return_value=fp_check)
 
     with pytest.raises(ValueError, match="指纹不存在"):
-        await storage_service.create_record_from_fingerprint(
-            db, fingerprint_id=999, filename="nope.zip", uploaded_by=1,
+        await storage_service.create_meta(
+            db, fingerprint_id=999, filename="nope.zip",
         )

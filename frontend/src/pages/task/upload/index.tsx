@@ -60,6 +60,7 @@ const UploadPage: FC = () => {
         await taskApi.createVersion(taskId, {
           version: form.version.trim() || "1.0.0",
           zip_fingerprint_id: zipRecordId,
+          filename: file?.name,
           changelog: form.changelog.trim() || undefined,
         });
         message.success("新版本已上传"); navigate(`/market/${taskId}`);

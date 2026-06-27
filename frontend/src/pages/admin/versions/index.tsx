@@ -67,7 +67,7 @@ const VersionsPage: FC = () => {
       await adminApi.createVersion({
         version: form.version, platform: form.platform, changelog: form.changelog || undefined,
         is_latest: form.is_latest, is_mandatory: form.is_mandatory,
-        files: Object.entries(updatedManifest).map(([path, { fingerprint_id }]) => ({ path, fingerprint_id: fingerprint_id! })),
+        files: Object.entries(updatedManifest).map(([path, { fingerprint_id }]) => ({ path, fingerprint_id: fingerprint_id!, filename: path.split("/").pop() || path })),
       });
       message.success("版本已创建"); setOpen(false);
       setForm({ version: "", platform: "Windows x64", changelog: "", is_latest: false, is_mandatory: false });

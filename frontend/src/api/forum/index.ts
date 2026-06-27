@@ -2,6 +2,11 @@ import { api } from "@/api/axios";
 import { uploadFile } from "@/api/storage";
 import type { ForumBoard, ThreadItem, ThreadDetail, ReplyItem, PageResult } from "@/types";
 
+interface ImageFingerprintPayload {
+  fingerprint_id: number;
+  filename: string;
+}
+
 export const forumApi = {
   listBoards: () =>
     api.get<{ code: number; data: ForumBoard[] }>("/api/v1/forum/boards").then((r) => r.data),
@@ -13,16 +18,16 @@ export const forumApi = {
   getThread: (id: number) =>
     api.get<{ code: number; data: ThreadDetail }>(`/api/v1/forum/threads/${id}`).then((r) => r.data),
 
-  createThread: (data: { title: string; content: string; board_id: number; image_fingerprint_ids?: number[] }) =>
+  createThread: (data: { title: string; content: string; board_id: number; image_fingerprints?: ImageFingerprintPayload[] }) =>
     api.post("/api/v1/forum/threads", data),
 
-  createReply: (threadId: number, content: string, parent_id?: number, image_fingerprint_ids?: number[]) =>
-    api.post<{ code: number; data: ReplyItem }>(`/api/v1/forum/threads/${threadId}/replies`, { content, parent_id, image_fingerprint_ids }),
+  createReply: (threadId: number, content: string, parent_id?: number, image_fingerprints?: ImageFingerprintPayload[]) =>
+    api.post<{ code: number; data: ReplyItem }>(`/api/v1/forum/threads/${threadId}/replies`, { content, parent_id, image_fingerprints }),
 
   likePost: (postId: number) =>
     api.post<{ code: number; data: { liked: boolean; like_count: number } }>(`/api/v1/forum/posts/${postId}/like`),
 
-  updateThread: (id: number, data: { title?: string; content?: string }) =>
+  updateThread: (id: number, data: { title?: string; content?: string; image_fingerprints?: ImageFingerprintPayload[] }) =>
     api.put(`/api/v1/forum/threads/${id}`, data),
 
   deleteThread: (id: number) =>

@@ -34,8 +34,10 @@ const ForumCreatePage: FC = () => {
     if (images.some((img) => img.uploading)) return message.warning("请等待图片上传完成");
     setSubmitting(true);
     try {
-      const imageIds = images.filter((img) => img.fileId !== null).map((img) => img.fileId as number);
-      await forumApi.createThread({ title: title.trim(), content: content.trim(), board_id: boardId, image_fingerprint_ids: imageIds });
+      const imageFingerprints = images
+        .filter((img) => img.fileId !== null)
+        .map((img) => ({ fingerprint_id: img.fileId as number, filename: img.file.name }));
+      await forumApi.createThread({ title: title.trim(), content: content.trim(), board_id: boardId, image_fingerprints: imageFingerprints });
       message.success("发布成功");
       navigate(`/forum/${boardId}`, { replace: true });
     } catch { /* ErrorToast */ }

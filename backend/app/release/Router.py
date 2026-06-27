@@ -1,6 +1,4 @@
 """客户端版本管理 — 列表 / diff / 下载 ZIP / Blob 下载"""
-import io
-import zipfile
 from urllib.parse import quote
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -14,8 +12,9 @@ from app.infrastructure.Response import ok
 from app.release.entity.DownloadVersion import DownloadVersion
 from app.release.entity.VersionFile import VersionFile
 from app.infrastructure.storage.entity.Fingerprint import Fingerprint
-from app.infrastructure.storage.entity.FileRecord import FileRecord
+from app.infrastructure.storage.entity.FileMeta import FileMeta
 from app.infrastructure.storage.MinioClient import client as minio
+from app.infrastructure.storage.StreamingZip import build_zip
 from app.audit.service import log_audit
 
 router = APIRouter(tags=["版本管理"])
@@ -70,8 +69,8 @@ async def diff_versions(
 
         vf_rows = (await db.execute(
             select(VersionFile, Fingerprint)
-            .join(FileRecord, VersionFile.file_record_id == FileRecord.id)
-            .join(Fingerprint, FileRecord.fingerprint_id == Fingerprint.id)
+            .join(FileMeta, VersionFile.file_meta_id == FileMeta.id)
+            .join(Fingerprint, FileMeta.fingerprint_id == Fingerprint.id)
             .where(VersionFile.version_id == latest.id)
         )).all()
 
@@ -84,7 +83,7 @@ async def diff_versions(
                 changed.append(DiffChangedFile(
                     path=vf.relative_path, sha256=fp.sha256,
                     size=fp.size, fingerprint_id=fp.id,
-                    record_id=vf.file_record_id,
+                    meta_id=vf.file_meta_id,
                 ))
 
         removed = []
@@ -98,7 +97,7 @@ async def diff_versions(
         )
 
 
-# @deprecated 下版本删除，用 /blobs/record/{record_id}
+# @deprecated 下版本删除，用 /blobs/meta/{meta_id}
 @router.get("/versions/blobs/{fingerprint_id}")
 async def download_blob(
     fingerprint_id: int,
@@ -119,27 +118,27 @@ async def download_blob(
         return StreamingResponse(gen, media_type=ct, headers=headers)
 
 
-@router.get("/versions/blobs/record/{record_id}")
-async def download_blob_by_record(
-    record_id: int,
+@router.get("/versions/blobs/meta/{meta_id}")
+async def download_blob_by_meta(
+    meta_id: int,
     _=Depends(require_perm_any("version:blob")),
 ):
-    """通过记录 ID 下载单个文件"""
+    """通过元数据 ID 下载单个文件"""
     async with async_session() as db:
-        record = (await db.execute(
-            select(FileRecord).where(FileRecord.id == record_id)
+        meta = (await db.execute(
+            select(FileMeta).where(FileMeta.id == meta_id)
         )).scalar_one_or_none()
-        if not record:
+        if not meta:
             raise HTTPException(404, "文件不存在")
 
-        fp = record.fingerprint
+        fp = meta.fingerprint
         gen, ct, length = minio.stream(fp.sha256)
         headers = {}
         if length:
             headers["Content-Length"] = str(length)
-        download_name = record.filename or "blob"
+        download_name = meta.filename or "blob"
         headers["Content-Disposition"] = f'attachment; filename="{download_name}"'
-        await log_audit(None, "download", "file", record_id, "", "")
+        await log_audit(None, "download", "file", meta_id, "", "")
         return StreamingResponse(gen, media_type=ct, headers=headers)
 
 
@@ -148,7 +147,7 @@ async def download_version_zip(
     version_id: int,
     _=Depends(require_perm_any("version:download")),
 ):
-    """下载版本为 zip 压缩包（流式，不落盘）"""
+    """下载版本为 zip 压缩包（临时文件打包，流式传输后自动清理）"""
     async with async_session() as db:
         v = (await db.execute(
             select(DownloadVersion).where(DownloadVersion.id == version_id)
@@ -158,38 +157,21 @@ async def download_version_zip(
 
         rows = (await db.execute(
             select(VersionFile, Fingerprint)
-            .join(FileRecord, VersionFile.file_record_id == FileRecord.id)
-            .join(Fingerprint, FileRecord.fingerprint_id == Fingerprint.id)
+            .join(FileMeta, VersionFile.file_meta_id == FileMeta.id)
+            .join(Fingerprint, FileMeta.fingerprint_id == Fingerprint.id)
             .where(VersionFile.version_id == version_id)
         )).all()
 
         if not rows:
             raise HTTPException(404, "版本无文件")
 
-        content_length = 0
-        for vf, fp in rows:
-            name_bytes = vf.relative_path.encode("utf-8")
-            content_length += fp.size + 30 + len(name_bytes) + 46 + len(name_bytes)
-        content_length += 22
-
-        def generate_zip():
-            buffer = io.BytesIO()
-            with zipfile.ZipFile(buffer, "w", zipfile.ZIP_STORED) as zf:
-                for vf, fp in rows:
-                    gen, ct, length = minio.stream(fp.sha256)
-                    content = b"".join(gen)
-                    zf.writestr(vf.relative_path, content)
-            buffer.seek(0)
-            while True:
-                chunk = buffer.read(8192)
-                if not chunk:
-                    break
-                yield chunk
+        entries = [(vf.relative_path, fp.sha256) for vf, fp in rows]
+        gen, content_length = build_zip(entries)
 
         await log_audit(None, "download", "version", version_id, "client v" + v.version, "")
         filename = quote(f"Elves-{v.version}.zip")
         return StreamingResponse(
-            generate_zip(),
+            gen,
             media_type="application/zip",
             headers={
                 "Content-Disposition": f'attachment; filename="{filename}"; filename*=UTF-8\'\'{filename}',

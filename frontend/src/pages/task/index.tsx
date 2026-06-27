@@ -1,7 +1,7 @@
 import { useEffect, useState, useCallback, useRef, type FC } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
-import { Input, Select, Row, Col, Typography, Button, Skeleton, Pagination } from "antd";
-import { SearchOutlined, PlusOutlined, FireOutlined, AppstoreOutlined } from "@ant-design/icons";
+import { Input, Select, Row, Col, Typography, Button, Skeleton, Pagination, message } from "antd";
+import { SearchOutlined, PlusOutlined, FireOutlined, AppstoreOutlined, DownloadOutlined, CloseOutlined } from "@ant-design/icons";
 import { taskApi } from "@/api/task";
 import type { TaskItem, PageResult } from "@/types";
 import { useAuthStore } from "@/store/auth";
@@ -9,6 +9,18 @@ import MarketCard from "@/pages/task/components/MarketCard";
 
 const { Title } = Typography;
 const CATEGORIES = ["全部", "综合"];
+
+/** 触发浏览器下载 blob */
+function triggerDownload(blob: Blob, filename: string) {
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  URL.revokeObjectURL(url);
+}
 
 const MarketPage: FC = () => {
   const navigate = useNavigate();
@@ -21,6 +33,10 @@ const MarketPage: FC = () => {
   const [searchParams, setSearchParams] = useSearchParams();
   const page = Number(searchParams.get("page")) || 1;
   const size = Number(searchParams.get("size")) || 20;
+
+  // ── 批量选择状态 ──
+  const [selectedIds, setSelectedIds] = useState<Set<number>>(new Set());
+  const [batchDownloading, setBatchDownloading] = useState(false);
 
   const setPage = (p: number, s?: number) => setSearchParams((prev) => {
     const n = new URLSearchParams(prev);
@@ -45,6 +61,37 @@ const MarketPage: FC = () => {
   useEffect(() => { load(); }, [load]);
 
   const doSearch = () => { setPage(1); load(search); };
+
+  // ── 选择处理 ──
+  const handleSelect = (id: number, checked: boolean) => {
+    setSelectedIds((prev) => {
+      const next = new Set(prev);
+      if (checked) next.add(id);
+      else next.delete(id);
+      return next;
+    });
+  };
+
+  const clearSelection = () => setSelectedIds(new Set());
+
+  // ── 批量下载 ──
+  const handleBatchDownload = async () => {
+    if (selectedIds.size === 0) return;
+    setBatchDownloading(true);
+    try {
+      const ids = [...selectedIds];
+      const blob = await taskApi.batchDownload(ids);
+      triggerDownload(blob, `tasks-batch-${ids.length}.zip`);
+      message.success(`已打包下载 ${ids.length} 个任务`);
+      clearSelection();
+    } catch {
+      message.error("批量下载失败，请稍后重试");
+    } finally {
+      setBatchDownloading(false);
+    }
+  };
+
+  const isSelecting = selectedIds.size > 0;
 
   return (
     <div className="pt-8">
@@ -83,6 +130,32 @@ const MarketPage: FC = () => {
           )}
         </div>
       </div>
+
+      {/* ── Batch Action Bar ── */}
+      {isSelecting && (
+        <div className="flex items-center gap-4 mb-4 px-4 py-3 rounded-3 bg-white border border-solid border-[#d4513b] shadow-[0_2px_8px_rgba(212,81,59,0.12)] animate-[card-in_0.2s_ease-out]">
+          <span className="text-[0.875rem] font-600 text-[#3d3630]">
+            已选 {selectedIds.size} 个任务
+          </span>
+          <Button
+            type="primary"
+            icon={<DownloadOutlined />}
+            loading={batchDownloading}
+            onClick={handleBatchDownload}
+            className="rounded-2"
+          >
+            批量下载
+          </Button>
+          <Button
+            icon={<CloseOutlined />}
+            onClick={clearSelection}
+            disabled={batchDownloading}
+            className="rounded-2"
+          >
+            取消选择
+          </Button>
+        </div>
+      )}
 
       {/* ── Filter Bar ── */}
       <div className="flex gap-2.5 mb-6 flex-wrap items-center p-4 rounded-3.5 bg-white border border-solid border-[#e8e3dc]">
@@ -145,7 +218,13 @@ const MarketPage: FC = () => {
         <Row gutter={[16, 16]}>
           {data.items.map((task, idx) => (
             <Col key={task.id} xs={24} sm={12} md={8} xl={6} xxl={4}>
-              <MarketCard task={task} index={idx} />
+              <MarketCard
+                task={task}
+                index={idx}
+                selectable
+                selected={selectedIds.has(task.id)}
+                onSelect={handleSelect}
+              />
             </Col>
           ))}
         </Row>

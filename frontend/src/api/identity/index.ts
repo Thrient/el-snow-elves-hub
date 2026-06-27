@@ -24,6 +24,7 @@ export const usersApi = {
     const { fingerprint_id } = await uploadFile(file);
     const fd = new FormData();
     fd.append("fingerprint_id", String(fingerprint_id));
+    fd.append("filename", file.name);
     return api.post<{ code: number; data: { avatar_url: string } }>("/api/v1/users/me/avatar", fd);
   },
 };

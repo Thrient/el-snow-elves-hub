@@ -48,12 +48,12 @@ const ForumThreadPage: FC = () => {
     if (!replyText.trim() || !thread) return;
     setSubmitting(true);
     try {
-      let imgIds: number[] = [];
+      let imageFingerprints: { fingerprint_id: number; filename: string }[] = [];
       if (replyImages.length > 0) {
         const results = await Promise.all(replyImages.map((f) => forumApi.uploadImage(f)));
-        imgIds = results.map((r) => r.fingerprint_id);
+        imageFingerprints = results.map((r, i) => ({ fingerprint_id: r.fingerprint_id, filename: replyImages[i].name }));
       }
-      const res = await forumApi.createReply(thread.id, replyText.trim(), replyingTo?.id, imgIds);
+      const res = await forumApi.createReply(thread.id, replyText.trim(), replyingTo?.id, imageFingerprints);
       const reply: ReplyItem = res.data;
       setReplyText(""); setReplyImages([]); setReplyingTo(null);
       setThread((prev) => prev ? {

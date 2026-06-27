@@ -21,11 +21,13 @@ from app.task.entity.TaskView import TaskView
 from app.task.Schema.TaskOut import TaskOut, TaskVersionOut
 from app.task.Schema.CommentOut import CommentOut
 from app.task.Schema.CommentCreate import CommentCreate
+from app.task.Schema.BatchDownloadRequest import BatchDownloadRequest
 from app.identity.entity.User import User
 from app.infrastructure.storage.entity.Fingerprint import Fingerprint
-from app.infrastructure.storage.entity.FileRecord import FileRecord
+from app.infrastructure.storage.entity.FileMeta import FileMeta
 from app.infrastructure.storage.StorageService import storage_service
 from app.infrastructure.storage.MinioClient import client as minio
+from app.infrastructure.storage.StreamingZip import build_zip
 from app.infrastructure.EventBus import publish_review
 from app.audit.service import log_audit
 
@@ -46,8 +48,8 @@ async def _to_task(t: Task, current_user_id: int | None, db: AsyncSession) -> Ta
         versions_out.append(TaskVersionOut(
             id=tv.id,
             version=tv.version,
-            file_name=tv.file_record.filename if tv.file_record else None,
-            file_size=tv.file_record.size if tv.file_record else None,
+            file_name=tv.file_meta.filename if tv.file_meta else None,
+            file_size=tv.file_meta.size if tv.file_meta else None,
             changelog=tv.changelog,
             created_at=tv.created_at,
         ))
@@ -56,8 +58,8 @@ async def _to_task(t: Task, current_user_id: int | None, db: AsyncSession) -> Ta
         author_id=t.author_id, author_name=author.username if author else "",
         author_avatar_url=author.avatar_url if author else None,
         category=t.category, tags=t.tags, version=t.current_version,
-        file_size=latest_version.file_record.size if latest_version and latest_version.file_record else None,
-        cover_url=f"/api/v1/files/{t.cover_record.fingerprint.sha256}" if t.cover_record else None,
+        file_size=latest_version.file_meta.size if latest_version and latest_version.file_meta else None,
+        cover_url=f"/api/v1/files/{t.cover_meta.fingerprint.sha256}" if t.cover_meta else None,
         status=t.status, view_count=t.view_count,
         download_count=t.download_count, like_count=t.like_count,
         comment_count=t.comment_count,
@@ -220,11 +222,11 @@ async def download_task(
             .order_by(TaskVersion.created_at.desc())
         )).scalars().first()
 
-    if not tv or not tv.file_record or not tv.file_record.fingerprint:
+    if not tv or not tv.file_meta or not tv.file_meta.fingerprint:
         raise HTTPException(404, "任务文件不存在")
 
     author = (await db.execute(select(User).where(User.id == t.author_id))).scalar_one_or_none()
-    gen, ct, length = minio.stream(tv.file_record.fingerprint.sha256)
+    gen, ct, length = minio.stream(tv.file_meta.fingerprint.sha256)
     download_name = f"{t.title}_{tv.version}_{author.username if author else 'unknown'}.zip"
     encoded = quote(download_name)
     await log_audit(user, "download", "task", task_id, "v" + str(version or "latest"), "")
@@ -232,6 +234,72 @@ async def download_task(
     if length:
         headers["Content-Length"] = str(length)
     return StreamingResponse(gen, media_type=ct, headers=headers)
+
+
+# ── Batch Download ──
+
+@router.post("/batch-download")
+async def batch_download_tasks(
+    req: BatchDownloadRequest,
+    db: AsyncSession = Depends(get_db),
+    user: User | None = Depends(get_optional_user),
+    request: Request = None,
+    _=Depends(require_perm_any("task:download")),
+):
+    """批量下载选中的任务，打包为单个 ZIP"""
+    task_ids = req.task_ids
+
+    # 查出所有 task + 最新 TaskVersion + Fingerprint + Author
+    task_rows = (await db.execute(
+        select(Task, TaskVersion, Fingerprint, User)
+        .join(TaskVersion, TaskVersion.task_id == Task.id)
+        .join(FileMeta, FileMeta.id == TaskVersion.file_meta_id)
+        .join(Fingerprint, Fingerprint.id == FileMeta.fingerprint_id)
+        .join(User, User.id == Task.author_id)
+        .where(
+            Task.id.in_(task_ids),
+            TaskVersion.id.in_(
+                select(func.max(TaskVersion.id))
+                .where(TaskVersion.task_id.in_(task_ids))
+                .group_by(TaskVersion.task_id)
+                .subquery(),
+            ),
+        )
+    )).all()
+
+    if not task_rows:
+        raise HTTPException(404, "所选任务无可用文件")
+
+    found_ids = {t.id for t, tv, fp, author in task_rows}
+    missing = [str(tid) for tid in task_ids if tid not in found_ids]
+    if missing:
+        raise HTTPException(404, f"任务 {', '.join(missing)} 不存在或无文件")
+
+    # 记录下载计数 + 审计
+    ip = _get_ip(request) if request else ""
+    uid = user.id if user else None
+    for t, tv, fp, author in task_rows:
+        recent = (await db.execute(
+            select(DownloadRecord).where(
+                and_(DownloadRecord.task_id == t.id, DownloadRecord.downloaded_at >= datetime.utcnow() - timedelta(hours=24))
+            )
+        )).scalars().all()
+        if not _has_recent(recent, uid, ip):
+            t.download_count += 1
+            db.add(DownloadRecord(task_id=t.id, user_id=uid, ip_address=ip))
+    await db.commit()
+    await log_audit(user, "batch_download", "task", 0, f"{len(task_rows)} tasks", "")
+
+    entries = [(f"{t.title}_{tv.version}_{author.username}.zip", fp.sha256) for t, tv, fp, author in task_rows]
+    gen, content_length = build_zip(entries)
+
+    download_name = f"tasks-batch-{len(task_rows)}.zip"
+    encoded = quote(download_name)
+    headers = {
+        "Content-Disposition": f"attachment; filename*=UTF-8''{encoded}",
+        "Content-Length": str(content_length),
+    }
+    return StreamingResponse(gen, media_type="application/zip", headers=headers)
 
 
 # ── Delete ──
@@ -362,6 +430,7 @@ async def create_task(
     version: str = Form("1.0"), filename: str = Form(""),
     zip_fingerprint_id: int = Form(..., alias="zip_fingerprint_id"),
     cover_fingerprint_id: int | None = Form(None, alias="cover_fingerprint_id"),
+    cover_filename: str = Form(""),
     user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
     _=Depends(require_perm_any("task:create")),
@@ -376,26 +445,26 @@ async def create_task(
     if not fp or fp.detected_type != "zip":
         raise HTTPException(400, "ZIP 文件指纹无效或类型不匹配")
 
-    file_record = await storage_service.create_record_from_fingerprint(
-        db, zip_fingerprint_id, filename, user.id,
+    file_meta = await storage_service.create_meta(
+        db, zip_fingerprint_id, filename,
     )
 
-    cover_record = None
+    cover_meta = None
     if cover_fingerprint_id:
         cfp = (await db.execute(
             select(Fingerprint).where(Fingerprint.id == cover_fingerprint_id)
         )).scalar_one_or_none()
         if not cfp or cfp.detected_type not in ("png", "jpeg", "gif"):
             raise HTTPException(400, "封面仅支持 PNG / JPEG / GIF 图片")
-        cover_record = await storage_service.create_record_from_fingerprint(
-            db, cover_fingerprint_id, filename or "cover", user.id,
+        cover_meta = await storage_service.create_meta(
+            db, cover_fingerprint_id, cover_filename,
         )
 
     task = Task(
         title=title, description=description, author_id=user.id,
         category=category, tags=tags, version=version,
         current_version=version,
-        cover_record_id=cover_record.id if cover_record else None,
+        cover_meta_id=cover_meta.id if cover_meta else None,
         status="published",
     )
     db.add(task)
@@ -404,7 +473,7 @@ async def create_task(
     tv = TaskVersion(
         task_id=task.id,
         version=version,
-        file_record_id=file_record.id,
+        file_meta_id=file_meta.id,
     )
     db.add(tv)
     await db.commit()
@@ -426,6 +495,7 @@ async def update_task(
     category: str | None = Form(None),
     tags: str | None = Form(None),
     cover_fingerprint_id: int | None = Form(None, alias="cover_fingerprint_id"),
+    cover_filename: str = Form(""),
     user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
     _=Depends(require_perm_any("task:create")),
@@ -447,10 +517,17 @@ async def update_task(
         )).scalar_one_or_none()
         if not cfp or cfp.detected_type not in ("png", "jpeg", "gif"):
             raise HTTPException(400, "封面仅支持 PNG / JPEG / GIF 图片")
-        cover_record = await storage_service.create_record_from_fingerprint(
-            db, cover_fingerprint_id, "cover", user.id,
+        old_cover_meta_id = t.cover_meta_id
+        # 先建新 FileMeta，再切换引用并 flush，最后删旧的
+        cover_meta = await storage_service.create_meta(
+            db, cover_fingerprint_id, cover_filename,
         )
-        t.cover_record_id = cover_record.id
+        t.cover_meta_id = cover_meta.id
+        await db.flush()
+        if old_cover_meta_id:
+            old_meta = await db.get(FileMeta, old_cover_meta_id)
+            if old_meta:
+                await db.delete(old_meta)
     await db.commit()
     await db.refresh(t)
     await log_audit(user, "update", "task", task_id, str(task_id), "")
@@ -492,15 +569,15 @@ async def create_task_version(
     if not fp or fp.detected_type != "zip":
         raise HTTPException(400, "ZIP 文件指纹无效或类型不匹配")
 
-    file_record = await storage_service.create_record_from_fingerprint(
-        db, zip_fingerprint_id, filename, user.id,
+    file_meta = await storage_service.create_meta(
+        db, zip_fingerprint_id, filename,
     )
 
     tv = TaskVersion(
         task_id=task_id,
         version=version,
         changelog=changelog,
-        file_record_id=file_record.id,
+        file_meta_id=file_meta.id,
     )
     db.add(tv)
     t.current_version = version
@@ -540,13 +617,20 @@ async def replace_version_file(
     if not fp or fp.detected_type != "zip":
         raise HTTPException(400, "ZIP 文件指纹无效或类型不匹配")
 
-    file_record = await storage_service.create_record_from_fingerprint(
-        db, zip_fingerprint_id, filename, user.id,
+    old_meta_id = tv.file_meta_id
+    # 先建新 FileMeta，再切换引用并 flush，最后删旧的 — 避免 flush 时 FK 仍指向旧行导致约束错误
+    file_meta = await storage_service.create_meta(
+        db, zip_fingerprint_id, filename,
     )
-    tv.file_record_id = file_record.id
+    tv.file_meta_id = file_meta.id
+    await db.flush()
+    if old_meta_id:
+        old_meta = await db.get(FileMeta, old_meta_id)
+        if old_meta:
+            await db.delete(old_meta)
     await db.commit()
     await log_audit(user, "update", "task_version", version_id, "replace file", "")
-    return ok({"version_id": tv.id, "file_size": file_record.size})
+    return ok({"version_id": tv.id, "file_size": file_meta.size})
 
 
 # ── Delete Version ──

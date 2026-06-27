@@ -15,6 +15,7 @@ from app.forum.entity.ForumPost import ForumPost
 from app.forum.entity.ForumLike import ForumLike
 from app.identity.entity.User import User
 from app.infrastructure.storage.StorageService import storage_service
+from app.infrastructure.storage.entity.FileMeta import FileMeta
 from app.notification.Router import create_notification
 from app.infrastructure.EventBus import publish_review
 from app.audit.service import log_audit
@@ -25,9 +26,9 @@ router = APIRouter(prefix="/forum", tags=["论坛"])
 async def _resolve_images(db: AsyncSession, image_ids: list | None) -> list[str]:
     if not image_ids:
         return []
-    from app.infrastructure.storage.entity.FileRecord import FileRecord
+    from app.infrastructure.storage.entity.FileMeta import FileMeta
     recs = (await db.execute(
-        select(FileRecord).where(FileRecord.id.in_(image_ids))
+        select(FileMeta).where(FileMeta.id.in_(image_ids))
     )).scalars().all()
     rec_map = {r.id: r for r in recs}
     return [f"/api/v1/files/{rec_map[rid].fingerprint.sha256}" for rid in image_ids if rid in rec_map]
@@ -199,18 +200,18 @@ async def create_thread(
     if not board:
         raise HTTPException(400, "板块不存在")
 
-    # Create FileRecords from fingerprint_ids
-    record_ids: list[int] = []
-    if body.image_fingerprint_ids:
-        for fp_id in body.image_fingerprint_ids:
-            record = await storage_service.create_record_from_fingerprint(
-                db, fp_id, filename="forum_image", uploaded_by=user.id,
+    # Create FileMetas from image_fingerprints
+    meta_ids: list[int] = []
+    if body.image_fingerprints:
+        for img in body.image_fingerprints:
+            meta = await storage_service.create_meta(
+                db, img.fingerprint_id, img.filename,
             )
-            record_ids.append(record.id)
+            meta_ids.append(meta.id)
 
     p = ForumPost(
         title=body.title, content=body.content, author_id=user.id,
-        board_id=body.board_id, image_ids=record_ids,
+        board_id=body.board_id, image_ids=meta_ids,
     )
     db.add(p)
     await db.commit()
@@ -248,19 +249,19 @@ async def create_reply(
             parent_auth = parent.author.username if parent.author else None
             parent_content = parent.content
 
-    # Create FileRecords from fingerprint_ids
-    record_ids: list[int] = []
-    if body.image_fingerprint_ids:
-        for fp_id in body.image_fingerprint_ids:
-            record = await storage_service.create_record_from_fingerprint(
-                db, fp_id, filename="forum_image", uploaded_by=user.id,
+    # Create FileMetas from image_fingerprints
+    meta_ids: list[int] = []
+    if body.image_fingerprints:
+        for img in body.image_fingerprints:
+            meta = await storage_service.create_meta(
+                db, img.fingerprint_id, img.filename,
             )
-            record_ids.append(record.id)
+            meta_ids.append(meta.id)
 
     r = ForumPost(
         content=body.content, author_id=user.id, board_id=thread.board_id,
         parent_id=body.parent_id or thread_id, thread_id=thread_id,
-        image_ids=record_ids,
+        image_ids=meta_ids,
     )
     db.add(r)
     thread.reply_count += 1
@@ -289,7 +290,7 @@ async def create_reply(
         parent_id=r.parent_id if r.parent_id != thread_id else None,
         parent_author=parent_auth,
         parent_content=parent_content,
-        image_urls=await _resolve_images(db, record_ids), like_count=0, liked=False,
+        image_urls=await _resolve_images(db, meta_ids), like_count=0, liked=False,
         created_at=r.created_at, updated_at=r.updated_at,
     ))
 
@@ -312,6 +313,21 @@ async def update_thread(
         p.title = body.title
     if body.content is not None:
         p.content = body.content
+    if body.image_fingerprints is not None:
+        old_ids = set(p.image_ids or [])
+        new_meta_ids: list[int] = []
+        for img in body.image_fingerprints:
+            meta = await storage_service.create_meta(
+                db, img.fingerprint_id, img.filename,
+            )
+            new_meta_ids.append(meta.id)
+        removed_ids = old_ids - set(new_meta_ids)
+        if removed_ids:
+            for mid in removed_ids:
+                old_meta = await db.get(FileMeta, mid)
+                if old_meta:
+                    await db.delete(old_meta)
+        p.image_ids = new_meta_ids
     await db.commit()
     await log_audit(user, "update", "post", thread_id, "", "")
     return ok({})
@@ -330,12 +346,26 @@ async def delete_thread(
 
     child_ids = (await db.execute(select(ForumPost.id).where(ForumPost.thread_id == thread_id))).scalars().all()
     all_ids = [thread_id, *child_ids]
+    # Collect all post image_ids for FileMeta cleanup
+    all_posts = list((await db.execute(
+        select(ForumPost).where(ForumPost.id.in_(all_ids))
+    )).scalars().all())
+    all_image_meta_ids: set[int] = set()
+    for post in all_posts:
+        if post.image_ids:
+            all_image_meta_ids.update(post.image_ids)
     await db.execute(sa_delete(ForumLike).where(ForumLike.post_id.in_(all_ids)))
     p_title = p.title
     p_id = p.id
     for cid in child_ids:
         await db.execute(sa_delete(ForumPost).where(ForumPost.id == cid))
     await db.delete(p)
+    # Delete orphaned FileMeta records
+    if all_image_meta_ids:
+        for mid in all_image_meta_ids:
+            old_meta = await db.get(FileMeta, mid)
+            if old_meta:
+                await db.delete(old_meta)
     await db.commit()
     await log_audit(user, "delete", "post", p_id, "thread: " + p_title, "")
     return ok({})

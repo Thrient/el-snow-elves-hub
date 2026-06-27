@@ -1,4 +1,4 @@
-"""AI Vision — 截图 → 千问视觉推理 → 返回文本"""
+"""AI Vision — 截图 → DeepSeek 视觉推理 → 返回文本"""
 from fastapi import APIRouter, Body, Depends
 from openai import AsyncOpenAI
 
@@ -17,8 +17,8 @@ def _get_client() -> AsyncOpenAI:
     global _client
     if _client is None:
         _client = AsyncOpenAI(
-            api_key=settings.dashscope_api_key,
-            base_url=settings.dashscope_base_url,
+            api_key=settings.deepseek_api_key,
+            base_url=settings.deepseek_base_url,
         )
     return _client
 
@@ -30,22 +30,26 @@ async def ai_vision(
     user: User | None = Depends(get_optional_user),
     _=Depends(require_perm_any("ai:vision")),
 ):
-    """接收截图 + 提示词，调用千问视觉模型返回识别结果。"""
+    """接收截图 + 提示词，调用 DeepSeek 视觉模型返回识别结果。"""
 
-    messages = [
-        {
-            "role": "user",
-            "content": [
-                {"type": "image_url", "image_url": {"url": image}},
-                {"type": "text", "text": prompt},
-            ],
-        },
-    ]
+    # DeepSeek 用顶层 image_data / image_url 字段，不是 OpenAI 的 content 数组格式
+    msg: dict = {"role": "user", "content": prompt}
+    if image.startswith("data:"):
+        # data:image/jpeg;base64,xxx → 纯 base64
+        msg["image_data"] = image.split(",", 1)[1] if "," in image else image
+    elif image.startswith("http://") or image.startswith("https://"):
+        msg["image_url"] = image
+    else:
+        msg["image_data"] = image  # 假定已是纯 base64
+
+    messages = [msg]
 
     try:
         completion = await _get_client().chat.completions.create(
-            model=settings.dashscope_model,
+            model=settings.deepseek_model,
             messages=messages,
+            reasoning_effort="high",
+            extra_body={"thinking": {"type": "enabled"}},
         )
     except Exception as e:
         raise BusinessException(f"AI 服务不可用: {str(e)[:200]}", 502)

@@ -5,7 +5,7 @@ from sqlalchemy import DateTime, ForeignKey, Integer, String, Text, func
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.infrastructure.Database import Base
-from app.infrastructure.storage.entity.FileRecord import FileRecord
+from app.infrastructure.storage.entity.FileMeta import FileMeta
 from app.task.entity.TaskVersion import TaskVersion
 
 
@@ -18,7 +18,7 @@ class Task(Base):
     author_id: Mapped[int] = mapped_column(ForeignKey("users.id"), nullable=False)
     category: Mapped[str] = mapped_column(String(32), default="综合")
     tags: Mapped[str | None] = mapped_column(String(500), nullable=True)
-    cover_record_id: Mapped[int | None] = mapped_column(Integer, ForeignKey("file_records.id"), nullable=True)
+    cover_meta_id: Mapped[int | None] = mapped_column(Integer, ForeignKey("file_metas.id"), nullable=True)
     version: Mapped[str] = mapped_column(String(32), default="1.0.0")
     current_version: Mapped[str] = mapped_column(String(32), default="1.0.0")
     status: Mapped[str] = mapped_column(String(16), default="published")
@@ -31,7 +31,9 @@ class Task(Base):
         DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
     )
 
-    cover_record = relationship("FileRecord", foreign_keys=[cover_record_id], lazy="selectin")
+    cover_meta: Mapped["FileMeta | None"] = relationship(
+        "FileMeta", foreign_keys=[cover_meta_id], lazy="selectin"
+    )
 
     versions: Mapped[list["TaskVersion"]] = relationship(
         "TaskVersion", back_populates="task", lazy="selectin",

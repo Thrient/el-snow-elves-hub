@@ -117,6 +117,7 @@ async def _deliver(msg: dict) -> None:
             q.put_nowait(data_str)
         except asyncio.QueueFull:
             pass
+        await r.expire(f"{KEY_PREFIX}{cid}", TTL)
 
 
 async def subscribe() -> None:

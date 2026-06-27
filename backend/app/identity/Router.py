@@ -30,7 +30,7 @@ from app.task.entity.TaskLike import TaskLike
 from app.task.entity.DownloadRecord import DownloadRecord
 from app.infrastructure.storage.StorageService import storage_service
 from app.infrastructure.storage.entity.Fingerprint import Fingerprint
-from app.infrastructure.storage.entity.FileRecord import FileRecord
+from app.infrastructure.storage.entity.FileMeta import FileMeta
 
 router = APIRouter(tags=["认证 / 用户"])
 _limiter = get_limiter()
@@ -300,6 +300,7 @@ async def my_likes(
 @router.post("/users/me/avatar")
 async def set_avatar(
     fingerprint_id: int = Form(...),
+    filename: str = Form(...),
     user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
     _=Depends(require_perm_any("user:avatar")),
@@ -313,14 +314,21 @@ async def set_avatar(
     if fp.detected_type and fp.detected_type not in ("png", "jpeg", "gif"):
         raise HTTPException(status.HTTP_400_BAD_REQUEST, detail="头像仅支持 PNG / JPEG / GIF 图片")
 
-    # 建 FileRecord
-    record = FileRecord(
-        fingerprint_id=fp.id, filename="avatar", size=fp.size, uploaded_by=user.id,
+    # 先建新 FileMeta，再切换引用并 flush，最后删旧的
+    old_avatar_meta_id = user.avatar_meta_id
+    meta = FileMeta(
+        fingerprint_id=fp.id, filename=filename, size=fp.size,
     )
-    db.add(record)
+    db.add(meta)
     await db.flush()
 
-    user.avatar_record_id = record.id
+    user.avatar_meta_id = meta.id
+    await db.flush()
+    if old_avatar_meta_id:
+        old_meta = await db.get(FileMeta, old_avatar_meta_id)
+        if old_meta:
+            await db.delete(old_meta)
+
     await db.commit()
     await db.refresh(user)
     await log_audit(user, "upload", "file", None, "avatar", "")

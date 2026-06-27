@@ -7,7 +7,7 @@ from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.infrastructure.Database import Base
 from app.infrastructure.rbac.entity.Role import Role
-from app.infrastructure.storage.entity.FileRecord import FileRecord
+from app.infrastructure.storage.entity.FileMeta import FileMeta
 
 
 class User(Base):
@@ -17,8 +17,8 @@ class User(Base):
     username: Mapped[str] = mapped_column(String(64), unique=True, nullable=False, index=True)
     email: Mapped[str] = mapped_column(String(255), unique=True, nullable=False, index=True)
     password_hash: Mapped[str] = mapped_column(String(255), nullable=False)
-    avatar_record_id: Mapped[int | None] = mapped_column(
-        ForeignKey("file_records.id"), nullable=True, comment="头像上传记录"
+    avatar_meta_id: Mapped[int | None] = mapped_column(
+        ForeignKey("file_metas.id"), nullable=True, comment="头像元数据"
     )
     token_version: Mapped[int] = mapped_column(Integer, default=0)
     is_disabled: Mapped[bool] = mapped_column(Boolean, default=False, server_default="0")
@@ -29,8 +29,8 @@ class User(Base):
     )
 
     roles: Mapped[list[Role]] = relationship(secondary="user_roles", lazy="selectin")
-    avatar_record: Mapped["FileRecord | None"] = relationship(
-        "FileRecord", foreign_keys=[avatar_record_id], lazy="selectin"
+    avatar_meta: Mapped["FileMeta | None"] = relationship(
+        "FileMeta", foreign_keys=[avatar_meta_id], lazy="selectin"
     )
 
     def has_permission(self, code: str) -> bool:
@@ -44,9 +44,9 @@ class User(Base):
 
     @property
     def avatar_url(self) -> str | None:
-        if not self.avatar_record or not self.avatar_record.fingerprint:
+        if not self.avatar_meta or not self.avatar_meta.fingerprint:
             return None
-        return f"/api/v1/files/{self.avatar_record.fingerprint.sha256}"
+        return f"/api/v1/files/{self.avatar_meta.fingerprint.sha256}"
 
     @property
     def role_ids(self) -> list[int]:

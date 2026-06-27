@@ -1,4 +1,4 @@
-"""AI 审核 Worker — 消费 RabbitMQ → llama.cpp 审核 → 直接写 DB"""
+"""AI 审核 Worker — 消费 RabbitMQ → DeepSeek 审核 → 直接写 DB"""
 import asyncio
 import base64
 import json
@@ -11,7 +11,7 @@ from sqlalchemy import select
 from app.infrastructure.Database import async_session
 from app.infrastructure.EventBus import close_bus, consume_review, publish_review
 from app.infrastructure.storage.StorageService import storage_service
-from app.infrastructure.storage.entity.FileRecord import FileRecord
+from app.infrastructure.storage.entity.FileMeta import FileMeta
 from app.forum.entity.ForumPost import ForumPost
 from app.task.entity.Task import Task as TaskModel
 from app.task.entity.Comment import Comment
@@ -29,8 +29,8 @@ def _get_ai_client() -> AsyncOpenAI:
     global _ai_client
     if _ai_client is None:
         _ai_client = AsyncOpenAI(
-            api_key=settings.dashscope_api_key,
-            base_url=settings.dashscope_base_url,
+            api_key=settings.deepseek_api_key,
+            base_url=settings.deepseek_base_url,
         )
     return _ai_client
 
@@ -91,10 +91,10 @@ def _extract_json(text: str) -> dict | None:
 
 
 async def ai_review_text(text: str, image_urls: list[str] | None = None) -> dict:
-    """调 llama.cpp 审查，返回 {"action": "pass"|"pending"|"reject"|None, "reason": str}"""
+    """调 DeepSeek 审查，返回 {"action": "pass"|"pending"|"reject"|None, "reason": str}"""
     prompt = REVIEW_PROMPT + text
 
-    # 构建 messages — 纯文本或带图片
+    # 构建 messages — DeepSeek 格式：content 纯文本，图片用顶层 image_url 字段
     if image_urls:
         image_b64s: list[str] = []
         async with httpx.AsyncClient(timeout=120) as cli:
@@ -111,13 +111,8 @@ async def ai_review_text(text: str, image_urls: list[str] | None = None) -> dict
                 except Exception as e:
                     print(f"AI review: image download error {full_url}: {e}")
         if image_b64s:
-            content_parts = [{"type": "text", "text": prompt}]
-            for b64 in image_b64s:
-                content_parts.append({
-                    "type": "image_url",
-                    "image_url": {"url": f"data:image/jpeg;base64,{b64}"},
-                })
-            messages = [{"role": "user", "content": content_parts}]
+            # DeepSeek 单图模式：image_url 放 data URI，content 放纯文本
+            messages = [{"role": "user", "content": prompt, "image_url": f"data:image/jpeg;base64,{image_b64s[0]}"}]
         else:
             # 有图片 URL 但下载全失败 — 标记为待人工审核
             print(f"AI review: all {len(image_urls)} image(s) failed to download, flagging for manual review")
@@ -129,9 +124,11 @@ async def ai_review_text(text: str, image_urls: list[str] | None = None) -> dict
     for attempt in range(3):
         try:
             completion = await _get_ai_client().chat.completions.create(
-                model=settings.dashscope_model,
+                model=settings.deepseek_model,
                 messages=messages,
                 max_tokens=32768,
+                reasoning_effort="high",
+                extra_body={"thinking": {"type": "enabled"}},
             )
             raw = completion.choices[0].message.content or ""
             result = _extract_json(raw)
@@ -158,7 +155,7 @@ async def _resolve_images(image_ids: list | None) -> list[str]:
         return []
     async with async_session() as db:
         recs = (await db.execute(
-            select(FileRecord).where(FileRecord.id.in_(image_ids))
+            select(FileMeta).where(FileMeta.id.in_(image_ids))
         )).scalars().all()
         return [f"/api/v1/files/{r.fingerprint.sha256}" for r in recs]
 
@@ -267,7 +264,7 @@ async def _handle_message(data: dict):
             if not t or t.status != "published":
                 return
             text = f"{t.title}\n{t.description or ''}"
-            cover_id = t.cover_record_id
+            cover_id = t.cover_meta_id
             author_id = t.author_id
             title = t.title
         images = await _resolve_images([cover_id] if cover_id else [])

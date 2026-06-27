@@ -39,7 +39,7 @@ export const adminApi = {
     changelog?: string;
     is_latest?: boolean;
     is_mandatory?: boolean;
-    files: { path: string; fingerprint_id: number }[];
+    files: { path: string; fingerprint_id: number; filename: string }[];
   }) => api.post("/api/v1/admin/versions", data),
   deleteVersion: (id: number) => api.delete(`/api/v1/admin/versions/${id}`),
 

@@ -10,6 +10,12 @@ export const taskApi = {
 
   download: (id: number, version?: string) => `/api/v1/tasks/${id}/download${version ? `?version=${encodeURIComponent(version)}` : ""}`,
 
+  batchDownload: (ids: number[]) =>
+    api.post<Blob>("/api/v1/tasks/batch-download",
+      { task_ids: ids },
+      { responseType: "blob" },
+    ),
+
   like: (id: number) =>
     api.post<{ code: number; data: { liked: boolean; like_count: number } }>(`/api/v1/tasks/${id}/like`).then((r) => r.data),
 
@@ -55,11 +61,13 @@ export const taskApi = {
   createVersion: (taskId: number, params: {
     version: string;
     zip_fingerprint_id: number;
+    filename?: string;
     changelog?: string;
   }) => {
     const fd = new FormData();
     fd.append("version", params.version);
     fd.append("zip_fingerprint_id", String(params.zip_fingerprint_id));
+    if (params.filename) fd.append("filename", params.filename);
     if (params.changelog) fd.append("changelog", params.changelog);
     return api.post<{ code: number; data: unknown }>(`/api/v1/tasks/${taskId}/versions`, fd).then((r) => r.data);
   },

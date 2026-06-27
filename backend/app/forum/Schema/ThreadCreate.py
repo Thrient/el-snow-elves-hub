@@ -5,8 +5,13 @@ from pydantic import BaseModel, field_validator
 _NO_HTML = re.compile(r"[<>]")
 
 
+class ImageFingerprint(BaseModel):
+    fingerprint_id: int
+    filename: str
+
+
 class ThreadCreate(BaseModel):
-    title: str; content: str; board_id: int; image_fingerprint_ids: list[int] | None = None
+    title: str; content: str; board_id: int; image_fingerprints: list[ImageFingerprint] | None = None
 
     @classmethod
     @field_validator("title", "content")

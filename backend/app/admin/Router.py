@@ -11,7 +11,7 @@ from app.infrastructure.Response import ok
 from app.identity.entity.User import User
 from app.release.entity.DownloadVersion import DownloadVersion
 from app.release.entity.VersionFile import VersionFile
-from app.infrastructure.storage.entity.FileRecord import FileRecord
+from app.infrastructure.storage.entity.FileMeta import FileMeta
 from app.infrastructure.storage.entity.Fingerprint import Fingerprint
 from app.infrastructure.storage.StorageService import storage_service
 from app.task.entity.Task import Task as TaskModel
@@ -116,8 +116,6 @@ async def delete_user(user_id: int, db: AsyncSession = Depends(get_db),
     await db.execute(sql_update(Notification).where(Notification.sender_id == user_id).values(sender_id=None))
     await db.execute(sql_update(DownloadRecord).where(DownloadRecord.user_id == user_id).values(user_id=None))
     await db.execute(sql_update(TaskView).where(TaskView.user_id == user_id).values(user_id=None))
-    await db.execute(sql_update(FileRecord).where(FileRecord.uploaded_by == user_id).values(uploaded_by=None))
-
     await db.flush()
     await db.delete(user)
     await db.commit()
@@ -282,16 +280,15 @@ async def create_version(body: VersionCreate, user: User = Depends(require_perm(
         if not fp:
             raise HTTPException(400, f"指纹不存在: {f_entry.fingerprint_id}")
 
-        record = await storage_service.create_record_from_fingerprint(
+        meta = await storage_service.create_meta(
             db, f_entry.fingerprint_id,
             filename=f_entry.path.split('/').pop() or "blob",
-            uploaded_by=user.id,
         )
         await db.flush()
         db.add(VersionFile(
             version_id=v.id,
             relative_path=f_entry.path,
-            file_record_id=record.id,
+            file_meta_id=meta.id,
         ))
 
     await db.commit()

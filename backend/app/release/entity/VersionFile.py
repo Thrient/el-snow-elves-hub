@@ -13,6 +13,6 @@ class VersionFile(Base):
         ForeignKey("download_versions.id"), nullable=False
     )
     relative_path: Mapped[str] = mapped_column(String(512), nullable=False)
-    file_record_id: Mapped[int] = mapped_column(
-        ForeignKey("file_records.id"), nullable=False
+    file_meta_id: Mapped[int] = mapped_column(
+        ForeignKey("file_metas.id", ondelete="CASCADE"), nullable=False
     )
