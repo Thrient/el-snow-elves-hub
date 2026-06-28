@@ -34,6 +34,45 @@ from app.audit.service import log_audit
 router = APIRouter(prefix="/tasks", tags=["任务市场"])
 
 
+# ── Lookup (lightweight, no pagination, no view tracking) ──
+
+@router.get("/lookup")
+async def lookup_task(
+    author: str = Query(""),
+    title: str = Query(""),
+    db: AsyncSession = Depends(get_db),
+    _=Depends(require_perm_any("task:lookup")),
+):
+    """轻量查询 — 桌面端用 author+title 查任务最新版本。不做分页、不记录 view。"""
+    if not author and not title:
+        raise HTTPException(400, "author or title required")
+
+    q = (
+        select(Task, User.username)
+        .join(User, User.id == Task.author_id)
+        .where(Task.status == "published")
+    )
+    if author:
+        q = q.where(User.username == author)
+    if title:
+        q = q.where(Task.title == title)
+
+    rows = (await db.execute(q)).all()
+
+    return ok({
+        "tasks": [
+            {
+                "id": t.id,
+                "title": t.title,
+                "version": t.current_version,
+                "author_name": username,
+                "updated_at": t.updated_at.isoformat() if t.updated_at else None,
+            }
+            for t, username in rows
+        ],
+    })
+
+
 async def _to_task(t: Task, current_user_id: int | None, db: AsyncSession) -> TaskOut:
     author = (await db.execute(select(User).where(User.id == t.author_id))).scalar_one_or_none()
     liked = False

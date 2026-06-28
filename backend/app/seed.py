@@ -84,7 +84,7 @@ async def seed():
                      "ai:vision",
                      "auth:login", "auth:register", "auth:verify", "auth:send-verify",
                      "forum:boards", "forum:search", "forum:threads", "forum:view",
-                     "task:list", "task:rankings", "task:user", "task:view", "task:comments", "task:download",
+                     "task:list", "task:rankings", "task:user", "task:view", "task:comments", "task:download", "task:lookup",
                      "route:list",
                      "version:list", "version:download", "version:diff", "version:blob",
                      "public:ping", "presence:stream"]

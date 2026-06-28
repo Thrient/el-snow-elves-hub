@@ -47,6 +47,7 @@ PERMISSION_CODES: dict[str, str] = {
     "task:like": "点赞任务",
     "task:comment": "发表评论",
     "task:delete": "删除任务",
+    "task:lookup": "查询任务版本",
     "forum:boards": "查看论坛板块",
     "forum:search": "搜索帖子",
     "forum:threads": "查看帖子列表",
