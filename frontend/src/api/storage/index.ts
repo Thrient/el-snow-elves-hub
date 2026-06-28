@@ -94,13 +94,7 @@ function computeSHA256(file: File, onProgress?: (pct: number) => void): Promise<
 }
 
 // ── Helpers ──
-
-function formatBytes(bytes: number): string {
-  if (bytes < 1024) return `${bytes} B`;
-  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
-  if (bytes < 1024 * 1024 * 1024) return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
-  return `${(bytes / (1024 * 1024 * 1024)).toFixed(1)} GB`;
-}
+import { formatSize } from "@/util/format";
 
 // ── Global concurrency pool ──
 
@@ -118,21 +112,6 @@ async function pooledUpload(
     }
   }
   await Promise.all(running);
-}
-
-function smoothProgress(
-  from: number, to: number, durationMs: number,
-  onFrame: (pct: number) => void,
-  onDone: () => void,
-): void {
-  if (from >= to || durationMs <= 0) { onDone(); return; }
-  const start = performance.now();
-  const step = () => {
-    const t = Math.min((performance.now() - start) / durationMs, 1);
-    onFrame(from + (to - from) * t);
-    if (t < 1) requestAnimationFrame(step); else onDone();
-  };
-  requestAnimationFrame(step);
 }
 
 // ── Progress callback type ──
@@ -190,14 +169,9 @@ export async function upload(
   const basePct = 20 + (totalBytes > 0 ? (existingBytes / totalBytes) * 80 : 0);
   const remainingBytes = totalBytes - existingBytes;
 
-  // Smooth animation for existing files (skip if no progress callback)
+  // Jump to basePct for existing files (instant, no animation needed)
   if (onProgress && basePct > hashEndPct) {
-    await new Promise<void>((resolve) => {
-      smoothProgress(hashEndPct, basePct, 600,
-        (pct) => onProgress?.({ overallPct: pct, phase: "uploading", detail: `${formatBytes(existingBytes)} 秒传` }),
-        resolve,
-      );
-    });
+    onProgress({ overallPct: basePct, phase: "uploading", detail: `${formatSize(existingBytes)} 秒传` });
   }
 
   // ── Phase 4: Upload remaining files (basePct → 100%, byte-weighted, global pool) ──
@@ -235,7 +209,7 @@ export async function upload(
     onProgress?.({
       overallPct: Math.min(pct, 99.9),
       phase: "uploading",
-      detail: `${formatBytes(globalUploadedBytes)} / ${formatBytes(remainingBytes)}`,
+      detail: `${formatSize(globalUploadedBytes)} / ${formatSize(remainingBytes)}`,
     });
   };
   emitProgress();

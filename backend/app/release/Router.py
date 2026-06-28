@@ -97,26 +97,6 @@ async def diff_versions(
         )
 
 
-# @deprecated 下版本删除，用 /blobs/meta/{meta_id}
-@router.get("/versions/blobs/{fingerprint_id}")
-async def download_blob(
-    fingerprint_id: int,
-    _=Depends(require_perm_any("version:blob")),
-):
-    """通过指纹 ID 下载单个文件（桌面端更新用）"""
-    async with async_session() as db:
-        fp = (await db.execute(
-            select(Fingerprint).where(Fingerprint.id == fingerprint_id)
-        )).scalar_one_or_none()
-        if not fp:
-            raise HTTPException(404, "文件不存在")
-
-        gen, ct, length = minio.stream(fp.sha256)
-        headers = {}
-        if length:
-            headers["Content-Length"] = str(length)
-        return StreamingResponse(gen, media_type=ct, headers=headers)
-
 
 @router.get("/versions/blobs/meta/{meta_id}")
 async def download_blob_by_meta(

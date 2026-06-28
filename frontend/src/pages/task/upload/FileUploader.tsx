@@ -1,7 +1,7 @@
 import { type FC, type DragEvent, type ChangeEvent } from "react";
 import { Button, Progress } from "antd";
 import { FileZipOutlined, CheckCircleOutlined, ThunderboltOutlined, DeleteOutlined } from "@ant-design/icons";
-import { formatSize, formatSpeed } from "@/util/format";
+import { formatSize } from "@/util/format";
 
 type UploadPhase = string;
 
@@ -15,7 +15,6 @@ interface Props {
   file: File | null;
   progress: number;
   uploadedBytes: number;
-  speed: number;
   dragOver: boolean;
   onDrop: (e: DragEvent) => void;
   onDragOver: (e: DragEvent) => void;
@@ -24,7 +23,7 @@ interface Props {
   onReset: () => void;
 }
 
-const FileUploader: FC<Props> = ({ phase, file, progress, uploadedBytes, speed, dragOver, onDrop, onDragOver, onDragLeave, onFileSelect, onReset }) => {
+const FileUploader: FC<Props> = ({ phase, file, progress, uploadedBytes, dragOver, onDrop, onDragOver, onDragLeave, onFileSelect, onReset }) => {
   const isUploading = ["hashing", "checking", "uploading"].includes(phase);
   const success = phase === "instant" || phase === "complete";
 
@@ -74,9 +73,6 @@ const FileUploader: FC<Props> = ({ phase, file, progress, uploadedBytes, speed, 
               <div className="mt-2.5">
                 <Progress percent={progress} size="small" strokeColor={{ from: "#d4513b", to: "#e87a5a" }}
                   format={() => phase === "uploading" && file ? `${formatSize(uploadedBytes)} / ${formatSize(file.size)}` : `${progress}%`} />
-                {phase === "uploading" && speed > 0 && (
-                  <div className="text-[0.6875rem] text-[#b8afa6] mt-0.5 text-right">{formatSpeed(speed)}</div>
-                )}
               </div>
             )}
           </div>

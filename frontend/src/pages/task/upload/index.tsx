@@ -95,7 +95,7 @@ const UploadPage: FC = () => {
       <StepIndicator step={step} />
 
       <FileUploader phase={filePhase || phase} file={file} progress={progress} uploadedBytes={uploadedBytes}
-        speed={0} dragOver={dragOver}
+        dragOver={dragOver}
         onDrop={handleDrop}
         onDragOver={(e) => { e.preventDefault(); setDragOver(true); }}
         onDragLeave={() => setDragOver(false)}
