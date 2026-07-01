@@ -38,22 +38,21 @@ router = APIRouter(prefix="/tasks", tags=["任务市场"])
 
 @router.get("/lookup")
 async def lookup_task(
-    author: str = Query(""),
+    task_id: int = Query(None),
     title: str = Query(""),
     db: AsyncSession = Depends(get_db),
     _=Depends(require_perm_any("task:lookup")),
 ):
-    """轻量查询 — 桌面端用 author+title 查任务最新版本。不做分页、不记录 view。"""
-    if not author and not title:
-        raise HTTPException(400, "author or title required")
+    """轻量查询 — 桌面端用 task_id 查任务最新版本。不做分页、不记录 view。"""
+    if not task_id:
+        return ok({"tasks": []})
 
     q = (
         select(Task, User.username)
         .join(User, User.id == Task.author_id)
         .where(Task.status == "published")
+        .where(Task.id == task_id)
     )
-    if author:
-        q = q.where(User.username == author)
     if title:
         q = q.where(Task.title == title)
 
@@ -273,7 +272,7 @@ async def download_task(
 
     author = (await db.execute(select(User).where(User.id == t.author_id))).scalar_one_or_none()
     gen, ct, length = minio.stream(tv.file_meta.fingerprint.sha256)
-    download_name = f"{t.title}_{tv.version}_{author.username if author else 'unknown'}.zip"
+    download_name = f"{t.title}_{tv.version}_{author.username if author else 'unknown'}_{task_id}.zip"
     encoded = quote(download_name)
     await log_audit(user, "download", "task", task_id, "v" + str(version or "latest"), "")
     headers = {"Content-Disposition": f"attachment; filename*=UTF-8''{encoded}"}
@@ -336,7 +335,7 @@ async def batch_download_tasks(
     await db.commit()
     await log_audit(user, "batch_download", "task", 0, f"{len(task_rows)} tasks", "")
 
-    entries = [(f"{t.title}_{tv.version}_{author.username}.zip", fp.sha256) for t, tv, fp, author in task_rows]
+    entries = [(f"{t.title}_{tv.version}_{author.username}_{t.id}.zip", fp.sha256) for t, tv, fp, author in task_rows]
     gen, content_length = build_zip(entries)
 
     download_name = f"tasks-batch-{len(task_rows)}.zip"

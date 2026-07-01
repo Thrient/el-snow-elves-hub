@@ -9,8 +9,6 @@ import { bus } from "@/event/bus";
 type Mode = "login" | "register";
 
 const PWD_MIN = 8;
-const NAME_MIN = 5;
-const NAME_MAX = 12;
 
 const LoginPage: FC = () => {
   const navigate = useNavigate();
@@ -138,7 +136,6 @@ const LoginPage: FC = () => {
                   style={delay(0.1)}
                   rules={[
                     { required: true, message: "请输入用户名" },
-                    { min: NAME_MIN, max: NAME_MAX, message: `用户名 ${NAME_MIN}-${NAME_MAX} 个字符` },
                     { pattern: /^[^<>"'&/]*$/, message: "用户名包含非法字符" },
                   ]}
                 >
